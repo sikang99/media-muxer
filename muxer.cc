@@ -304,7 +304,7 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
     c->channel_layout = av_get_default_channel_layout(c->channels);
     c->sample_rate    = 44100;
     mAudioStream->time_base = (AVRational){ 1, c->sample_rate };
-
+    /*c->time_base             = mAudioStream->time_base;*/
     if (mContext->oformat->flags & AVFMT_GLOBALHEADER)
         c->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
@@ -421,7 +421,13 @@ int main(int argc, char **argv)
     auto m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
     // Muxer* m = new Muxer(NULL, "abc.mkv");
     m->start();
-    sleep(20);
+    int cycles = 20;
+    while (cycles-- >= 0) {
+        av_log(NULL, AV_LOG_INFO, ".");
+        sleep(1);
+    }
+    av_log(NULL, AV_LOG_INFO, "\n");
     delete m;
+    av_log(NULL, AV_LOG_INFO, "muxer done!\n");
     return 0;
 }
