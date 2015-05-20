@@ -418,7 +418,7 @@ int main(int argc, char **argv)
     avformat_network_init();
     // av_log_set_level(AV_LOG_DEBUG);
 
-    Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
+    auto m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
     // Muxer* m = new Muxer(NULL, "abc.mkv");
     m->start();
     sleep(20);
