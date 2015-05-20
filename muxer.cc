@@ -1,6 +1,6 @@
-// c++ aac_encoder.cc -L../libav-11.3/libavcodec -L../libav-11.3/libavformat -L../libav-11.3/libavutil -L../libav-11.3/libavresample -lavresample -lavcodec -lavformat -lavutil -lvpx -lopus -lz -lbz2 -lfdk-aac -lboost_system -lboost_thread-mt -o aac-transcoder
+// c++ muxer.cc -L../libav-11.3/libavcodec -L../libav-11.3/libavformat -L../libav-11.3/libavutil -L../libav-11.3/libavresample -lavresample -lavcodec -lavformat -lavutil -lvpx -lopus -lz -lbz2 -lfdk-aac -lboost_system -lboost_thread-mt -o muxer
 
-// c++ aac_encoder.cc -L../libav-11.3/libavcodec -L../libav-11.3/libavformat -L../libav-11.3/libavutil -L../libav-11.3/libavresample -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lboost_system -lboost_thread -pthread -L../../build/lib -lfdk-aac -o aac-transcoder
+// c++ muxer.cc -L../libav-11.3/libavcodec -L../libav-11.3/libavformat -L../libav-11.3/libavutil -L../libav-11.3/libavresample -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lboost_system -lboost_thread -pthread -L../../build/lib -lfdk-aac -o muxer
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -27,101 +27,102 @@ static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
 }
 
 /* just pick the highest supported samplerate */
-static int select_sample_rate(AVCodec *codec)
-{
-    const int *p;
-    int best_samplerate = 0;
+// static int select_sample_rate(AVCodec *codec)
+// {
+//     const int *p;
+//     int best_samplerate = 0;
 
-    if (!codec->supported_samplerates)
-        return 44100;
+//     if (!codec->supported_samplerates)
+//         return 44100;
 
-    p = codec->supported_samplerates;
-    while (*p) {
-        best_samplerate = FFMAX(*p, best_samplerate);
-        p++;
-    }
-    return best_samplerate;
-}
+//     p = codec->supported_samplerates;
+//     while (*p) {
+//         best_samplerate = FFMAX(*p, best_samplerate);
+//         p++;
+//     }
+//     return best_samplerate;
+// }
 
 /* select layout with the highest channel count */
-static int select_channel_layout(AVCodec *codec)
-{
-    const uint64_t *p;
-    uint64_t best_ch_layout = 0;
-    int best_nb_channels   = 0;
+// static int select_channel_layout(AVCodec *codec)
+// {
+//     const uint64_t *p;
+//     uint64_t best_ch_layout = 0;
+//     int best_nb_channels   = 0;
 
-    if (!codec->channel_layouts)
-        return AV_CH_LAYOUT_STEREO;
+//     if (!codec->channel_layouts)
+//         return AV_CH_LAYOUT_STEREO;
 
-    p = codec->channel_layouts;
-    while (*p) {
-        int nb_channels = av_get_channel_layout_nb_channels(*p);
+//     p = codec->channel_layouts;
+//     while (*p) {
+//         int nb_channels = av_get_channel_layout_nb_channels(*p);
 
-        if (nb_channels > best_nb_channels) {
-            best_ch_layout    = *p;
-            best_nb_channels = nb_channels;
-        }
-        p++;
-    }
-    return best_ch_layout;
-}
+//         if (nb_channels > best_nb_channels) {
+//             best_ch_layout    = *p;
+//             best_nb_channels = nb_channels;
+//         }
+//         p++;
+//     }
+//     return best_ch_layout;
+// }
 
 static void fill_yuv_image(AVFrame *pict, int frame_index, int width, int height)
 {
-  int x, y, i, ret;
+    int x, y, i, ret;
 
-  /* when we pass a frame to the encoder, it may keep a reference to it
-  * internally;
-  * make sure we do not overwrite it here
-  */
-  ret = av_frame_make_writable(pict);
-  if (ret < 0)
-    exit(1);
+    /* when we pass a frame to the encoder, it may keep a reference to it
+     * internally;
+     * make sure we do not overwrite it here
+     */
+    ret = av_frame_make_writable(pict);
+    if (ret < 0)
+        exit(1);
 
-  i = frame_index;
+    i = frame_index;
 
-  /* Y */
-  for (y = 0; y < height; y++)
-    for (x = 0; x < width; x++)
-      pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
+    /* Y */
+    for (y = 0; y < height; y++)
+        for (x = 0; x < width; x++)
+            pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
 
-  /* Cb and Cr */
-  for (y = 0; y < height / 2; y++) {
-    for (x = 0; x < width / 2; x++) {
-      pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
-      pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
+    /* Cb and Cr */
+    for (y = 0; y < height / 2; y++) {
+        for (x = 0; x < width / 2; x++) {
+            pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
+            pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
+        }
     }
-  }
 }
 
-static AVFrame* alloc_picture(enum AVPixelFormat pix_fmt, int width, int height)
+static AVFrame* alloc_video_frame(AVCodecContext* c)
 {
-  AVFrame *picture;
-  int ret;
+    AVFrame *picture;
 
-  picture = av_frame_alloc();
-  if (!picture)
-    return NULL;
+    picture = av_frame_alloc();
+    if (!picture)
+        return NULL;
 
-  picture->format = pix_fmt;
-  picture->width  = width;
-  picture->height = height;
+    picture->format = c->pix_fmt;
+    picture->width  = c->width;
+    picture->height = c->height;
 
-  /* allocate the buffers for the frame data */
-  if (av_frame_get_buffer(picture, 32) < 0)
-    return NULL;
+    /* allocate the buffers for the frame data */
+    if (av_frame_get_buffer(picture, 32) < 0) {
+        av_frame_free(&picture);
+        return NULL;
+    }
 
-  return picture;
+    return picture;
 }
 
-static AVFrame* alloc_audioFrame(AVCodecContext* c, uint8_t** buffer)
+static AVFrame* alloc_audio_frame(AVCodecContext* c, uint8_t** buffer)
 {
     int buffer_size;
 
     /* frame containing input raw audio */
     AVFrame* frame = av_frame_alloc();
     if (!frame) {
-        fprintf(stderr, "could not allocate audio frame\n");
+        av_log(NULL, AV_LOG_ERROR, "allocate audio frame failed\n");
         return NULL;
     }
 
@@ -134,12 +135,12 @@ static AVFrame* alloc_audioFrame(AVCodecContext* c, uint8_t** buffer)
     buffer_size = av_samples_get_buffer_size(NULL, c->channels, c->frame_size, c->sample_fmt, 0);
     uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size));
     if (!samples) {
-        fprintf(stderr, "could not allocate %d bytes for samples buffer\n", buffer_size);
+        av_log(NULL, AV_LOG_ERROR, "allocate %d bytes for samples buffer failed\n", buffer_size);
         return NULL;
     }
     /* setup the data pointers in the AVFrame */
     if (avcodec_fill_audio_frame(frame, c->channels, c->sample_fmt, samples, buffer_size, 0) < 0) {
-        fprintf(stderr, "could not setup audio frame\n");
+        av_log(NULL, AV_LOG_ERROR, "setup audio frame failed\n");
         return NULL;
     }
     *buffer = samples;
@@ -178,13 +179,13 @@ Muxer::Muxer(const char* fmt, const std::string& uri)
 {
     mContext = avformat_alloc_context();
     if (!mContext) {
-        fprintf(stderr, "Could not allocate output format context\n");
+        av_log(NULL, AV_LOG_ERROR, "allocate output format context failed\n");
         return;
     }
 
     mContext->oformat = av_guess_format(fmt, uri.c_str(), NULL);
     if (!mContext->oformat) {
-        fprintf(stderr, "Could not find output file format\n");
+        av_log(NULL, AV_LOG_ERROR, "output format not supported\n");
         return;
     }
 
@@ -217,7 +218,7 @@ void Muxer::start() {
     if (mHasAudio || mHasVideo) {
         if (!(mContext->oformat->flags & AVFMT_NOFILE)) {
             if (avio_open(&mContext->pb, mContext->filename, AVIO_FLAG_WRITE) < 0) {
-                fprintf(stderr, "Could not open output file\n");
+                av_log(NULL, AV_LOG_ERROR, "open output file failed\n");
                 return;
             }
         }
@@ -225,8 +226,9 @@ void Muxer::start() {
         av_dump_format(mContext, 0, mContext->filename, 1);
         mMuxing = true;
         mThread = boost::thread(&Muxer::loop, this);
+        av_log(NULL, AV_LOG_INFO, "muxer started - audio: %s, video: %s\n", mHasAudio?"true":"false", mHasVideo?"true":"false");
     } else {
-        fprintf(stderr, "No stream to publish\n");
+        av_log(NULL, AV_LOG_ERROR, "no stream to publish\n");
     }
 }
 
@@ -234,13 +236,13 @@ bool Muxer::addVideoStream(enum AVCodecID codecId)
 {
     AVCodec* codec = avcodec_find_encoder(codecId);
     if (!codec) {
-        fprintf(stderr, "video codec not found\n");
+        av_log(NULL, AV_LOG_ERROR, "video codec not found\n");
         return false;
     }
     mContext->oformat->video_codec = codecId;
     mVideoStream = avformat_new_stream(mContext, codec);
     if (!mVideoStream) {
-        fprintf(stderr, "Could not create new audio stream\n");
+        av_log(NULL, AV_LOG_ERROR, "create new video stream failed\n");
         return false;
     }
 
@@ -253,9 +255,9 @@ bool Muxer::addVideoStream(enum AVCodecID codecId)
     c->width    = 640;
     c->height   = 480;
     /* timebase: This is the fundamental unit of time (in seconds) in terms
-    * of which frame timestamps are represented. For fixed-fps content,
-    * timebase should be 1/framerate and timestamp increments should be
-    * identical to 1. */
+     * of which frame timestamps are represented. For fixed-fps content,
+     * timebase should be 1/framerate and timestamp increments should be
+     * identical to 1. */
     mVideoStream->time_base = (AVRational){ 1, 30 };
     c->time_base             = mVideoStream->time_base;
 
@@ -266,7 +268,7 @@ bool Muxer::addVideoStream(enum AVCodecID codecId)
         c->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
     if (avcodec_open2(c, NULL, NULL) < 0) {
-        fprintf(stderr, "could not open codec\n");
+        av_log(NULL, AV_LOG_ERROR, "open video codec failed\n");
         return false;
     }
     return true;
@@ -276,12 +278,12 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
 {
     AVCodec* codec = avcodec_find_encoder(codecId);
     if (!codec) {
-        fprintf(stderr, "audio codec not found\n");
+        av_log(NULL, AV_LOG_ERROR, "audio codec not found\n");
         return false;
     }
 
     if (!(mAudioStream = avformat_new_stream(mContext, codec))) {
-        fprintf(stderr, "Could not create new audio stream\n");
+        av_log(NULL, AV_LOG_ERROR, "create new audio stream failed\n");
         return false;
     }
 
@@ -293,22 +295,21 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
     /* check that the encoder supports s16 pcm input */
     c->sample_fmt = AV_SAMPLE_FMT_S16;
     if (!check_sample_fmt(codec, c->sample_fmt)) {
-        fprintf(stderr, "encoder does not support %s",
-                av_get_sample_fmt_name(c->sample_fmt));
+        av_log(NULL, AV_LOG_ERROR, "encoder does not support %s\n", av_get_sample_fmt_name(c->sample_fmt));
         return false;
     }
 
     /* select other audio parameters supported by the encoder */
-    c->sample_rate    = select_sample_rate(codec);
-    c->channel_layout = select_channel_layout(codec);
-    c->channels       = av_get_channel_layout_nb_channels(c->channel_layout);
+    c->channels       = 1;
+    c->channel_layout = av_get_default_channel_layout(c->channels);
+    c->sample_rate    = 44100;
     mAudioStream->time_base = (AVRational){ 1, c->sample_rate };
 
     if (mContext->oformat->flags & AVFMT_GLOBALHEADER)
         c->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
     if (avcodec_open2(c, NULL, NULL) < 0) {
-        fprintf(stderr, "could not open codec\n");
+        av_log(NULL, AV_LOG_ERROR, "open audio codec failed\n");
         return false;
     }
     return true;
@@ -322,7 +323,7 @@ int Muxer::writeVideoFrame(AVFrame* frame, int pts)
     frame->pts = pts;
     int got_packet = 0;
     if (avcodec_encode_video2(mVideoStream->codec, &pkt, frame, &got_packet) < 0) {
-        fprintf(stderr, "Error encoding a video frame\n");
+        av_log(NULL, AV_LOG_ERROR, "error encoding a video frame\n");
         av_free_packet(&pkt);
         return 1;
     }
@@ -351,7 +352,7 @@ int Muxer::writeAudioFrame(AVFrame* frame, int pts, uint8_t* buffer)
     frame->pts = pts;
     /* encode the samples */
     if (avcodec_encode_audio2(mAudioStream->codec, &pkt, frame, &got_output) < 0) {
-        fprintf(stderr, "error encoding audio frame\n");
+        av_log(NULL, AV_LOG_ERROR, "error encoding a audio frame\n");
         av_free_packet(&pkt);
         return 1;
     }
@@ -371,14 +372,18 @@ void Muxer::loop()
     AVFrame* aFrame = NULL;
     uint8_t* samples = NULL;
     if (mHasVideo) {
-        vFrame = alloc_picture(mVideoStream->codec->pix_fmt, mVideoStream->codec->width, mVideoStream->codec->height);
+        vFrame = alloc_video_frame(mVideoStream->codec);
         if (!vFrame) {
-            fprintf(stderr, "could not allocate video frame\n");
+            av_log(NULL, AV_LOG_ERROR, "allocate video frame failed\n");
             return;
         }
     }
     if (mHasAudio) {
-        aFrame = alloc_audioFrame(mAudioStream->codec, &samples);
+        aFrame = alloc_audio_frame(mAudioStream->codec, &samples);
+        if (!aFrame) {
+            av_log(NULL, AV_LOG_ERROR, "allocate audio frame failed\n");
+            return;
+        }
     }
 
     while (mMuxing) {
@@ -416,7 +421,7 @@ int main(int argc, char **argv)
     Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
     // Muxer* m = new Muxer(NULL, "abc.mkv");
     m->start();
-    sleep(100);
+    sleep(20);
     delete m;
     return 0;
 }
