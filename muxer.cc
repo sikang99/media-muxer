@@ -148,9 +148,8 @@ class Muxer {
 public:
     Muxer(const char*, const std::string&);
     virtual ~Muxer();
-    void start();
+    bool start();
     void stop();
-    bool done() { return !mMuxing; }
 private:
     AVFormatContext* mContext;
     AVStream* mAudioStream;
@@ -208,7 +207,7 @@ void Muxer::stop()
     avformat_free_context(mContext);
 }
 
-void Muxer::start() {
+bool Muxer::start() {
     if (addVideoStream(AV_CODEC_ID_H264))
         mHasVideo = true;
     if (addAudioStream(AV_CODEC_ID_PCM_MULAW))
@@ -217,7 +216,7 @@ void Muxer::start() {
         if (!(mContext->oformat->flags & AVFMT_NOFILE)) {
             if (avio_open(&mContext->pb, mContext->filename, AVIO_FLAG_WRITE) < 0) {
                 av_log(NULL, AV_LOG_ERROR, "open output file failed\n");
-                return;
+                return false;
             }
         }
         avformat_write_header(mContext, NULL);
@@ -225,9 +224,10 @@ void Muxer::start() {
         mMuxing = true;
         mThread = boost::thread(&Muxer::loop, this);
         av_log(NULL, AV_LOG_INFO, "muxer started - audio: %s, video: %s\n", mHasAudio?"true":"false", mHasVideo?"true":"false");
-    } else {
-        av_log(NULL, AV_LOG_ERROR, "no stream to publish\n");
+        return true;
     }
+    av_log(NULL, AV_LOG_ERROR, "no stream to publish\n");
+    return false;
 }
 
 bool Muxer::addVideoStream(enum AVCodecID codecId)
@@ -422,11 +422,12 @@ int main(int argc, char **argv)
     avformat_network_init();
     // av_log_set_level(AV_LOG_DEBUG);
 
-    Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
-    // Muxer* m = new Muxer(NULL, "abc.mkv");
-    m->start();
-    int cycles = 50;
-    while (!m->done() && cycles-- >= 0) {
+    // Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
+    Muxer* m = new Muxer(NULL, "abc.mkv");
+    if (!m->start())
+        return 1;
+    int cycles = 5;
+    while (cycles-- >= 0) {
         av_log(NULL, AV_LOG_INFO, ".");
         sleep(1);
     }
