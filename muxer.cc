@@ -153,6 +153,7 @@ public:
     virtual ~Muxer();
     void start();
     void stop();
+    bool done() { return !mMuxing; }
 private:
     AVFormatContext* mContext;
     AVStream* mAudioStream;
@@ -375,6 +376,7 @@ void Muxer::loop()
         vFrame = alloc_video_frame(mVideoStream->codec);
         if (!vFrame) {
             av_log(NULL, AV_LOG_ERROR, "allocate video frame failed\n");
+            mMuxing = false;
             return;
         }
     }
@@ -382,6 +384,7 @@ void Muxer::loop()
         aFrame = alloc_audio_frame(mAudioStream->codec, &samples);
         if (!aFrame) {
             av_log(NULL, AV_LOG_ERROR, "allocate audio frame failed\n");
+            mMuxing = false;
             return;
         }
     }
@@ -422,7 +425,7 @@ int main(int argc, char **argv)
     // Muxer* m = new Muxer(NULL, "abc.mkv");
     m->start();
     int cycles = 20;
-    while (cycles-- >= 0) {
+    while (!m->done() && cycles-- >= 0) {
         av_log(NULL, AV_LOG_INFO, ".");
         sleep(1);
     }
