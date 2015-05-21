@@ -132,6 +132,7 @@ static AVFrame* alloc_audio_frame(AVCodecContext* c, uint8_t** buffer)
 
     /* the codec gives us the frame size, in samples,
      * we calculate the size of the samples buffer in bytes */
+    av_log(NULL, AV_LOG_DEBUG, "alloc_audio_frame - channels:%d, nb_samples:%d, format:%s\n", c->channels, c->frame_size, av_get_sample_fmt_name(c->sample_fmt));
     buffer_size = av_samples_get_buffer_size(NULL, c->channels, c->frame_size, c->sample_fmt, 0);
     uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size));
     if (!samples) {
@@ -214,7 +215,7 @@ void Muxer::stop()
 void Muxer::start() {
     if (addVideoStream(AV_CODEC_ID_H264))
         mHasVideo = true;
-    if (addAudioStream(AV_CODEC_ID_AAC))
+    if (addAudioStream(AV_CODEC_ID_PCM_MULAW))
         mHasAudio = true;
     if (mHasAudio || mHasVideo) {
         if (!(mContext->oformat->flags & AVFMT_NOFILE)) {
@@ -303,7 +304,7 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
     /* select other audio parameters supported by the encoder */
     c->channels       = 1;
     c->channel_layout = av_get_default_channel_layout(c->channels);
-    c->sample_rate    = 44100;
+    c->sample_rate    = 8000;
     mAudioStream->time_base = (AVRational){ 1, c->sample_rate };
     /*c->time_base             = mAudioStream->time_base;*/
     if (mContext->oformat->flags & AVFMT_GLOBALHEADER)
@@ -313,6 +314,9 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
         av_log(NULL, AV_LOG_ERROR, "open audio codec failed\n");
         return false;
     }
+
+    if (c->codec->capabilities & CODEC_CAP_VARIABLE_FRAME_SIZE)
+        c->frame_size = 10000;
     return true;
 }
 
@@ -424,7 +428,7 @@ int main(int argc, char **argv)
     auto m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
     // Muxer* m = new Muxer(NULL, "abc.mkv");
     m->start();
-    int cycles = 20;
+    int cycles = 50;
     while (!m->done() && cycles-- >= 0) {
         av_log(NULL, AV_LOG_INFO, ".");
         sleep(1);
