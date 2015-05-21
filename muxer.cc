@@ -1,17 +1,13 @@
-// c++ muxer.cc -L../libav-11.3/libavcodec -L../libav-11.3/libavformat -L../libav-11.3/libavutil -L../libav-11.3/libavresample -lavresample -lavcodec -lavformat -lavutil -lvpx -lopus -lz -lbz2 -lfdk-aac -lboost_system -lboost_thread-mt -o muxer
-
-// c++ muxer.cc -L../libav-11.3/libavcodec -L../libav-11.3/libavformat -L../libav-11.3/libavutil -L../libav-11.3/libavresample -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lboost_system -lboost_thread -pthread -L../../build/lib -lfdk-aac -o muxer
+#include <boost/thread.hpp>
+#include <string>
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/avstring.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/mathematics.h>
 }
-
-#include <boost/thread.hpp>
-#include <string>
-
 
 /* check that a given sample format is supported by the encoder */
 static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
