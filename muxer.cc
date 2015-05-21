@@ -394,6 +394,7 @@ void Muxer::loop()
     }
 
     while (mMuxing) {
+        usleep(30000);
         if (mHasAudio && mHasVideo) {
             if (av_compare_ts(vpts, mVideoStream->codec->time_base, apts, mAudioStream->codec->time_base) <= 0) {
                 writeVideoFrame(vFrame, vpts);
@@ -425,7 +426,7 @@ int main(int argc, char **argv)
     avformat_network_init();
     // av_log_set_level(AV_LOG_DEBUG);
 
-    auto m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
+    Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
     // Muxer* m = new Muxer(NULL, "abc.mkv");
     m->start();
     int cycles = 50;
@@ -434,7 +435,7 @@ int main(int argc, char **argv)
         sleep(1);
     }
     av_log(NULL, AV_LOG_INFO, "\n");
+
     delete m;
-    av_log(NULL, AV_LOG_INFO, "muxer done!\n");
     return 0;
 }
