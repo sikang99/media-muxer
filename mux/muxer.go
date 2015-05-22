@@ -124,11 +124,15 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 	if m.context == (*C.AVFormatContext)(null) {
 		return nil, fmt.Errorf("allocate output format context failed")
 	}
-	m.context.oformat = C.av_guess_format(C.CString(format), C.CString(uri), (*C.char)(null))
+	var f *C.char = C.CString(format)
+	var u *C.char = C.CString(uri)
+	defer C.free(unsafe.Pointer(f))
+	defer C.free(unsafe.Pointer(u))
+	m.context.oformat = C.av_guess_format(f, u, (*C.char)(null))
 	if m.context.oformat == (*C.AVOutputFormat)(null) {
 		return nil, fmt.Errorf("output format not supported")
 	}
-	C.av_strlcpy(&m.context.filename[0], C.CString(uri), C.size_t(unsafe.Sizeof(m.context.filename)))
+	C.av_strlcpy(&m.context.filename[0], u, C.size_t(unsafe.Sizeof(m.context.filename)))
 	return &m, nil
 }
 
