@@ -1,14 +1,17 @@
 package mux
 
 /*
-  #cgo CFLAGS: -I/opt/local/include
-  #cgo linux LDFLAGS: -L/opt/local/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -pthread -lfdk-aac -lx264 -lm
-	#cgo darwin LDFLAGS: -L/opt/local/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopus
-	#include <libavformat/avformat.h>
-	#include <libavcodec/avcodec.h>
-	#include <libavutil/avstring.h>
-	#include <libavutil/channel_layout.h>
-	#include <libavutil/mathematics.h>
+  #cgo linux LDFLAGS: -lm -pthread -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopos
+  #cgo darwin LDFLAGS: -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopus
+  #cgo pkg-config: libavformat
+  #cgo pkg-config: libavcodec
+  #cgo pkg-config: libavutil
+  #cgo pkg-config: libavresample
+  #include <libavformat/avformat.h>
+  #include <libavcodec/avcodec.h>
+  #include <libavutil/avstring.h>
+  #include <libavutil/channel_layout.h>
+  #include <libavutil/mathematics.h>
   static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
   {
       const enum AVSampleFormat *p = codec->sample_fmts;
@@ -186,7 +189,7 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 		return false
 	}
 	c.channels = 1
-	c.channel_layout = C.av_get_default_channel_layout(c.channels)
+	c.channel_layout = C.uint64_t(C.av_get_default_channel_layout(c.channels))
 	c.sample_rate = 8000
 	m.audioStream.stream.time_base = C.AVRational{1, c.sample_rate}
 	c.time_base = m.audioStream.stream.time_base
