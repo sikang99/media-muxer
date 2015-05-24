@@ -1,8 +1,9 @@
 package main
 
 /*
-  #cgo linux CFLAGS: -I../../libav-11.3
-	#cgo linux LDFLAGS: -L../../libav-11.3/libavcodec -L../../libav-11.3/libavformat -L../../libav-11.3/libavutil -L../../libav-11.3/libavresample -L../../../build/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -pthread -lfdk-aac -lx264 -lm
+  #cgo CFLAGS: -I../../libav-11.3
+  #cgo linux LDFLAGS: -L../../libav-11.3/libavcodec -L../../libav-11.3/libavformat -L../../libav-11.3/libavutil -L../../libav-11.3/libavresample -L../../../build/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -pthread -lfdk-aac -lx264 -lm
+	#cgo darwin LDFLAGS: -L../../libav-11.3/libavcodec -L../../libav-11.3/libavformat -L../../libav-11.3/libavutil -L../../libav-11.3/libavresample -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopus
 	#include <libavformat/avformat.h>
 	#include <libavcodec/avcodec.h>
 	#include <libavutil/avstring.h>
@@ -136,7 +137,7 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 	return &m, nil
 }
 
-func (m *Muxer) addVideoStream(codecId uint32) bool {
+func (m *Muxer) AddVideoStream(codecId uint32) bool {
 	codec := C.avcodec_find_encoder(codecId)
 	if codec == (*C.AVCodec)(null) {
 		return false
@@ -165,7 +166,7 @@ func (m *Muxer) addVideoStream(codecId uint32) bool {
 	return true
 }
 
-func (m *Muxer) addAudioStream(codecId uint32) bool {
+func (m *Muxer) AddAudioStream(codecId uint32) bool {
 	codec := C.avcodec_find_encoder(codecId)
 	if codec == (*C.AVCodec)(null) {
 		return false
@@ -237,10 +238,10 @@ func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
 }
 
 func (m *Muxer) Start() bool {
-	if !m.addVideoStream(C.AV_CODEC_ID_H264) {
+	if !m.AddVideoStream(C.AV_CODEC_ID_H264) {
 		return false
 	}
-	if !m.addAudioStream(C.AV_CODEC_ID_PCM_MULAW) {
+	if !m.AddAudioStream(C.AV_CODEC_ID_PCM_MULAW) {
 		return false
 	}
 	if m.context.oformat.flags&C.AVFMT_NOFILE == 0 {
@@ -248,8 +249,10 @@ func (m *Muxer) Start() bool {
 			return false
 		}
 	}
-	C.avformat_write_header(m.context, (**C.AVDictionary)(null))
 	C.av_dump_format(m.context, 0, &m.context.filename[0], 1)
+	if C.avformat_write_header(m.context, (**C.AVDictionary)(null)) < 0 {
+		return false
+	}
 	go m.routine()
 	return true
 }

@@ -28,5 +28,5 @@
 *.app
 muxer
 abc.mkv
-*.dSYM/mux/mux
+*.dSYM
 mux/mux
