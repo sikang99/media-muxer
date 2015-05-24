@@ -110,17 +110,18 @@ var (
 
 type Muxer struct {
 	context     *C.AVFormatContext
-	audioStream *C.AVStream
-	videoStream *C.AVStream
-	vts         int
-	ats         int
+	audioStream Stream
+	videoStream Stream
 	done        chan bool
 }
 
+type Stream struct {
+	stream *C.AVStream
+	ts     int
+}
+
 func NewMuxer(format, uri string) (*Muxer, error) {
-	m := Muxer{vts: 0,
-		ats:  0,
-		done: make(chan bool)}
+	m := Muxer{done: make(chan bool)}
 	m.context = C.avformat_alloc_context()
 	if m.context == (*C.AVFormatContext)(null) {
 		return nil, fmt.Errorf("allocate output format context failed")
@@ -143,18 +144,19 @@ func (m *Muxer) AddVideoStream(codecId uint32) bool {
 		return false
 	}
 	m.context.oformat.video_codec = codecId
-	m.videoStream = C.avformat_new_stream(m.context, codec)
-	if m.videoStream == (*C.AVStream)(null) {
+	stream := C.avformat_new_stream(m.context, codec)
+	if stream == (*C.AVStream)(null) {
 		return false
 	}
-	c := m.videoStream.codec
+	m.videoStream = Stream{stream, 0}
+	c := m.videoStream.stream.codec
 	c.codec_id = codecId
 	c.codec_type = C.AVMEDIA_TYPE_VIDEO
 	c.bit_rate = 400000
 	c.width = 640
 	c.height = 480
-	m.videoStream.time_base = C.AVRational{1, 30}
-	c.time_base = m.videoStream.time_base
+	m.videoStream.stream.time_base = C.AVRational{1, 30}
+	c.time_base = m.videoStream.stream.time_base
 	c.gop_size = 12
 	c.pix_fmt = C.AV_PIX_FMT_YUV420P
 	if m.context.oformat.flags&C.AVFMT_GLOBALHEADER != 0 {
@@ -172,11 +174,12 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 		return false
 	}
 	m.context.oformat.audio_codec = codecId
-	m.audioStream = C.avformat_new_stream(m.context, codec)
-	if m.audioStream == (*C.AVStream)(null) {
+	stream := C.avformat_new_stream(m.context, codec)
+	if stream == (*C.AVStream)(null) {
 		return false
 	}
-	c := m.audioStream.codec
+	m.audioStream = Stream{stream, 0}
+	c := m.audioStream.stream.codec
 	c.bit_rate = 48000
 	c.sample_fmt = C.AV_SAMPLE_FMT_S16
 	if C.check_sample_fmt(codec, c.sample_fmt) == 0 {
@@ -185,8 +188,8 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 	c.channels = 1
 	c.channel_layout = C.av_get_default_channel_layout(c.channels)
 	c.sample_rate = 8000
-	m.audioStream.time_base = C.AVRational{1, c.sample_rate}
-	c.time_base = m.audioStream.time_base
+	m.audioStream.stream.time_base = C.AVRational{1, c.sample_rate}
+	c.time_base = m.audioStream.stream.time_base
 	if m.context.oformat.flags&C.AVFMT_GLOBALHEADER != 0 {
 		c.flags |= C.CODEC_FLAG_GLOBAL_HEADER
 	}
@@ -202,38 +205,38 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
-	C.fill_yuv_image(frame, C.int(m.vts), m.videoStream.codec)
-	frame.pts = C.int64_t(m.vts)
-	m.vts++
+	C.fill_yuv_image(frame, C.int(m.videoStream.ts), m.videoStream.stream.codec)
+	frame.pts = C.int64_t(m.videoStream.ts)
+	m.videoStream.ts++
 	got_packet := C.int(0)
-	if C.avcodec_encode_video2(m.videoStream.codec, &pkt, frame, &got_packet) < 0 {
+	if C.avcodec_encode_video2(m.videoStream.stream.codec, &pkt, frame, &got_packet) < 0 {
 		C.av_free_packet(&pkt)
 		return false
 	}
 	if got_packet == 0 {
 		return false
 	}
-	C.av_packet_rescale_ts(&pkt, m.videoStream.codec.time_base, m.videoStream.time_base)
-	pkt.stream_index = m.videoStream.index
+	C.av_packet_rescale_ts(&pkt, m.videoStream.stream.codec.time_base, m.videoStream.stream.time_base)
+	pkt.stream_index = m.videoStream.stream.index
 	return C.av_interleaved_write_frame(m.context, &pkt) == 0
 }
 
 func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
-	C.fill_audio_frame(frame, m.audioStream.codec)
-	frame.pts = C.int64_t(m.ats)
-	m.ats += int(m.audioStream.codec.frame_size)
+	C.fill_audio_frame(frame, m.audioStream.stream.codec)
+	frame.pts = C.int64_t(m.audioStream.ts)
+	m.audioStream.ts += int(m.audioStream.stream.codec.frame_size)
 	got_packet := C.int(0)
-	if C.avcodec_encode_audio2(m.audioStream.codec, &pkt, frame, &got_packet) < 0 {
+	if C.avcodec_encode_audio2(m.audioStream.stream.codec, &pkt, frame, &got_packet) < 0 {
 		C.av_free_packet(&pkt)
 		return false
 	}
 	if got_packet == 0 {
 		return false
 	}
-	C.av_packet_rescale_ts(&pkt, m.audioStream.codec.time_base, m.audioStream.time_base)
-	pkt.stream_index = m.audioStream.index
+	C.av_packet_rescale_ts(&pkt, m.audioStream.stream.codec.time_base, m.audioStream.stream.time_base)
+	pkt.stream_index = m.audioStream.stream.index
 	return C.av_interleaved_write_frame(m.context, &pkt) == 0
 }
 
@@ -260,8 +263,8 @@ func (m *Muxer) Start() bool {
 func (m *Muxer) Stop() {
 	m.done <- true
 	C.av_write_trailer(m.context)
-	C.avcodec_close(m.videoStream.codec)
-	C.avcodec_close(m.audioStream.codec)
+	C.avcodec_close(m.videoStream.stream.codec)
+	C.avcodec_close(m.audioStream.stream.codec)
 	if m.context.oformat.flags&C.AVFMT_NOFILE == 0 {
 		C.avio_close(m.context.pb)
 	}
@@ -282,19 +285,19 @@ func (m *Muxer) CheckForDone() bool {
 }
 
 func (m *Muxer) routine() {
-	vFrame := C.alloc_video_frame(m.videoStream.codec)
+	vFrame := C.alloc_video_frame(m.videoStream.stream.codec)
 	if vFrame == (*C.AVFrame)(null) {
 		m.done <- true
 		return
 	}
-	aFrame := C.alloc_audio_frame(m.audioStream.codec)
+	aFrame := C.alloc_audio_frame(m.audioStream.stream.codec)
 	if aFrame == (*C.AVFrame)(null) {
 		m.done <- true
 		return
 	}
 	for {
-		if C.av_compare_ts(C.int64_t(m.vts), m.videoStream.codec.time_base,
-			C.int64_t(m.ats), m.audioStream.codec.time_base) <= 0 {
+		if C.av_compare_ts(C.int64_t(m.videoStream.ts), m.videoStream.stream.codec.time_base,
+			C.int64_t(m.audioStream.ts), m.audioStream.stream.codec.time_base) <= 0 {
 			m.writeVideoFrame(vFrame)
 		} else {
 			m.writeAudioFrame(aFrame)
