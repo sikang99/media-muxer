@@ -1,9 +1,9 @@
 package mux
 
 /*
-  #cgo CFLAGS: -I../../libav-11.3
-  #cgo linux LDFLAGS: -L../../libav-11.3/libavcodec -L../../libav-11.3/libavformat -L../../libav-11.3/libavutil -L../../libav-11.3/libavresample -L../../../build/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -pthread -lfdk-aac -lx264 -lm
-	#cgo darwin LDFLAGS: -L../../libav-11.3/libavcodec -L../../libav-11.3/libavformat -L../../libav-11.3/libavutil -L../../libav-11.3/libavresample -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopus
+  #cgo CFLAGS: -I/opt/local/include
+  #cgo linux LDFLAGS: -L/opt/local/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -pthread -lfdk-aac -lx264 -lm
+	#cgo darwin LDFLAGS: -L/opt/local/lib -lavformat -lavcodec -lavutil -lavresample -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopus
 	#include <libavformat/avformat.h>
 	#include <libavcodec/avcodec.h>
 	#include <libavutil/avstring.h>

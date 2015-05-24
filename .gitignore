@@ -30,3 +30,4 @@ muxer
 abc.mkv
 *.dSYM
 mux/mux
+media-muxer
