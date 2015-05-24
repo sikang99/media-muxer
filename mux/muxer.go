@@ -1,4 +1,4 @@
-package main
+package mux
 
 /*
   #cgo CFLAGS: -I../../libav-11.3
@@ -313,11 +313,4 @@ func init() {
 	C.av_register_all()
 	C.avformat_network_init()
 	// C.av_log_set_level(C.AV_LOG_DEBUG)
-}
-
-func main() {
-	m, err := NewMuxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp")
-	if err == nil && m.Start() {
-		m.WaitForDone()
-	}
 }
