@@ -1,12 +1,9 @@
 package mux
 
 /*
-  #cgo linux LDFLAGS: -lm -pthread -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopos
+  #cgo linux LDFLAGS: -lm
   #cgo darwin LDFLAGS: -lz -lbz2 -lfdk-aac -lx264 -lvpx -lopus
-  #cgo pkg-config: libavformat
-  #cgo pkg-config: libavcodec
-  #cgo pkg-config: libavutil
-  #cgo pkg-config: libavresample
+  #cgo pkg-config: libavformat libavcodec libavutil
   #include <libavformat/avformat.h>
   #include <libavcodec/avcodec.h>
   #include <libavutil/avstring.h>
