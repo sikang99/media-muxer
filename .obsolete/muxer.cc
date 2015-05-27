@@ -4,9 +4,13 @@
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavdevice/avdevice.h>
 #include <libavutil/avstring.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
+#include "libswscale/swscale.h"
+#include <SDL/SDL.h>
 }
 
 /* check that a given sample format is supported by the encoder */
@@ -62,33 +66,33 @@ static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
 //     return best_ch_layout;
 // }
 
-static void fill_yuv_image(AVFrame *pict, int frame_index, int width, int height)
-{
-    int x, y, i, ret;
+// static void fill_yuv_image(AVFrame *pict, int frame_index, int width, int height)
+// {
+//     int x, y, i, ret;
 
-    /* when we pass a frame to the encoder, it may keep a reference to it
-     * internally;
-     * make sure we do not overwrite it here
-     */
-    ret = av_frame_make_writable(pict);
-    if (ret < 0)
-        exit(1);
+//     /* when we pass a frame to the encoder, it may keep a reference to it
+//      * internally;
+//      * make sure we do not overwrite it here
+//      */
+//     ret = av_frame_make_writable(pict);
+//     if (ret < 0)
+//         exit(1);
 
-    i = frame_index;
+//     i = frame_index;
 
-    /* Y */
-    for (y = 0; y < height; y++)
-        for (x = 0; x < width; x++)
-            pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
+//     /* Y */
+//     for (y = 0; y < height; y++)
+//         for (x = 0; x < width; x++)
+//             pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
 
-    /* Cb and Cr */
-    for (y = 0; y < height / 2; y++) {
-        for (x = 0; x < width / 2; x++) {
-            pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
-            pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
-        }
-    }
-}
+//     /* Cb and Cr */
+//     for (y = 0; y < height / 2; y++) {
+//         for (x = 0; x < width / 2; x++) {
+//             pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
+//             pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
+//         }
+//     }
+// }
 
 static AVFrame* alloc_video_frame(AVCodecContext* c)
 {
@@ -98,16 +102,14 @@ static AVFrame* alloc_video_frame(AVCodecContext* c)
     if (!picture)
         return NULL;
 
+    if (!c)
+        return picture;
+
     picture->format = c->pix_fmt;
     picture->width  = c->width;
     picture->height = c->height;
 
-    /* allocate the buffers for the frame data */
-    if (av_frame_get_buffer(picture, 32) < 0) {
-        av_frame_free(&picture);
-        return NULL;
-    }
-
+    av_image_alloc(picture->data, picture->linesize, c->width, c->height, c->pix_fmt, 32);
     return picture;
 }
 
@@ -144,6 +146,186 @@ static AVFrame* alloc_audio_frame(AVCodecContext* c, uint8_t** buffer)
     return frame;
 }
 
+#define REFRESH_EVENT  (SDL_USEREVENT + 1)
+
+class Display {
+public:
+    Display(const std::string&, AVCodecContext*);
+    virtual ~Display();
+    void render(AVFrame*);
+    const bool getStatus() const {return mRendering;}
+    void start();
+    void stop();
+private:
+    AVCodecContext* mCodec;
+    SDL_Surface* mScreen;
+    SDL_Overlay* mBmp;
+    SDL_Event mEvent;
+    AVFrame* mFrame;
+    bool mRendering;
+    boost::thread mThread;
+    void loop();
+};
+
+void Display::render(AVFrame* frame) {
+    mFrame = frame;
+    SDL_Event evt;
+    evt.type = REFRESH_EVENT;
+    SDL_PushEvent(&evt);
+}
+
+void Display::start()
+{
+    mRendering = true;
+    mThread = boost::thread(&Display::loop, this);
+}
+
+void Display::stop()
+{
+    mRendering = false;
+    mThread.join();
+}
+
+Display::Display(const std::string& title, AVCodecContext* ctx)
+    : mCodec (ctx)
+    , mRendering (false)
+{
+    mScreen = SDL_SetVideoMode(ctx->width, ctx->height, 0, 0);
+    mBmp = SDL_CreateYUVOverlay(ctx->width, ctx->height, SDL_IYUV_OVERLAY, mScreen);
+    SDL_WM_SetCaption(title.c_str(), NULL);
+}
+
+Display::~Display()
+{
+    stop();
+}
+
+void Display::loop()
+{
+    SDL_Rect rect;
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = mCodec->width;
+    rect.h = mCodec->height;
+    while (mRendering) {
+        SDL_WaitEvent(&mEvent);
+        if (mEvent.type == REFRESH_EVENT) {
+            SDL_LockYUVOverlay(mBmp);
+            mBmp->pixels[0] = mFrame->data[0];
+            mBmp->pixels[2] = mFrame->data[1];
+            mBmp->pixels[1] = mFrame->data[2];
+            mBmp->pitches[0] = mFrame->linesize[0];
+            mBmp->pitches[2] = mFrame->linesize[1];
+            mBmp->pitches[1] = mFrame->linesize[2];
+            SDL_UnlockYUVOverlay(mBmp);
+            SDL_DisplayYUVOverlay(mBmp, &rect);
+        } else if (mEvent.type == SDL_QUIT) {
+            mRendering = false;
+            break;
+        }
+    }
+}
+
+class CameraReader {
+public:
+    CameraReader(const std::string&);
+    virtual ~CameraReader();
+    AVCodecContext* getCodec() {return mContext->streams[mIndex]->codec;}
+    int read(AVFrame*);
+private:
+    int mIndex;
+    AVFormatContext* mContext;
+    struct SwsContext* mSwsCtx;
+    AVFrame* mFrame; // rgb
+};
+
+CameraReader::CameraReader(const std::string& device)
+    : mIndex (-1)
+    , mSwsCtx (NULL)
+    , mFrame (NULL)
+{
+    mContext = avformat_alloc_context();
+#if defined linux
+    AVInputFormat* ifmt = av_find_input_format("video4linux2");
+#else // Darwin
+    AVInputFormat* ifmt = av_find_input_format("avfoundation");
+#endif
+    if (avformat_open_input(&mContext, device.c_str(), ifmt, NULL) < 0) {
+        av_log(NULL, AV_LOG_ERROR, "cannot open camera");
+        return;
+    }
+    if (avformat_find_stream_info(mContext, NULL) < 0) {
+        av_log(NULL, AV_LOG_ERROR, "cannot find stream information");
+    }
+    for (size_t i = 0; i < mContext->nb_streams; ++i) {
+        if (mContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+            mIndex = i;
+            break;
+        }
+    }
+    if (mIndex == -1) {
+        av_log(NULL, AV_LOG_ERROR, "cannot find video streams");
+        return;
+    }
+    AVCodec* codec = avcodec_find_decoder(mContext->streams[mIndex]->codec->codec_id);
+    if (!codec) {
+        av_log(NULL, AV_LOG_ERROR, "cannot find decode codec");
+        return;
+    }
+    if (avcodec_open2(mContext->streams[mIndex]->codec, codec, NULL) < 0) {
+        av_log(NULL, AV_LOG_ERROR, "cannot open decode codec");
+        return;
+    }
+    mSwsCtx = sws_getContext(mContext->streams[mIndex]->codec->width,
+        mContext->streams[mIndex]->codec->height,
+        mContext->streams[mIndex]->codec->pix_fmt,
+        mContext->streams[mIndex]->codec->width,
+        mContext->streams[mIndex]->codec->height,
+        AV_PIX_FMT_YUV420P, SWS_BILINEAR, NULL, NULL, NULL);
+
+    mFrame = av_frame_alloc();
+    av_log(NULL, AV_LOG_DEBUG, "camera - video codec=%s\n", avcodec_descriptor_get(mContext->streams[mIndex]->codec->codec_id)->name);
+    av_log(NULL, AV_LOG_DEBUG, "camera - video width=%d, height=%d\n", mContext->streams[mIndex]->codec->width, mContext->streams[mIndex]->codec->height);
+}
+
+CameraReader::~CameraReader()
+{
+    av_frame_free(&mFrame);
+    AVCodecContext* c = mContext->streams[mIndex]->codec;
+    if (c)
+        avcodec_close(c);
+    avformat_close_input(&mContext);
+    sws_freeContext(mSwsCtx);
+}
+
+int CameraReader::read(AVFrame* frame)
+{
+    if (!frame)
+        return -1;
+
+    AVPacket pkt = {0};
+    av_init_packet(&pkt);
+    int ret = av_read_frame(mContext, &pkt);
+    if (ret < 0)
+        return ret;
+    if (pkt.stream_index != mIndex) {
+        av_log(NULL, AV_LOG_WARNING, "not video frame");
+        return -1;
+    }
+    int got_frame = 0;
+    ret = avcodec_decode_video2(mContext->streams[mIndex]->codec, mFrame, &got_frame, &pkt);
+    av_free_packet(&pkt);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "decode frame error");
+        return ret;
+    }
+    if (got_frame) {
+        sws_scale(mSwsCtx, const_cast<const uint8_t**>(mFrame->data), mFrame->linesize, 0, mContext->streams[mIndex]->codec->height, frame->data, frame->linesize);
+        return 0;
+    }
+    return -1;
+}
+
 class Muxer {
 public:
     Muxer(const char*, const std::string&);
@@ -157,6 +339,8 @@ private:
     bool mMuxing;
     bool mHasVideo;
     bool mHasAudio;
+    CameraReader* mReader;
+    Display* mDisplay;
 
     bool addAudioStream(enum AVCodecID);
     bool addVideoStream(enum AVCodecID);
@@ -173,6 +357,8 @@ Muxer::Muxer(const char* fmt, const std::string& uri)
     , mMuxing (false)
     , mHasVideo (false)
     , mHasAudio (false)
+    , mReader (NULL)
+    , mDisplay (NULL)
 {
     mContext = avformat_alloc_context();
     if (!mContext) {
@@ -187,12 +373,20 @@ Muxer::Muxer(const char* fmt, const std::string& uri)
     }
 
     av_strlcpy(mContext->filename, uri.c_str(), sizeof(mContext->filename));
+#if defined linux
+    mReader = new CameraReader("/dev/video0");
+#else // Darwin
+    mReader = new CameraReader("0");
+#endif
+    mDisplay = new Display("Camera", mReader->getCodec());
 }
 
 Muxer::~Muxer()
 {
+    delete mDisplay;
     if (mMuxing)
         stop();
+    delete mReader;
 }
 
 void Muxer::stop()
@@ -224,6 +418,7 @@ bool Muxer::start() {
         mMuxing = true;
         mThread = boost::thread(&Muxer::loop, this);
         av_log(NULL, AV_LOG_INFO, "muxer started - audio: %s, video: %s\n", mHasAudio?"true":"false", mHasVideo?"true":"false");
+        mDisplay->start();
         return true;
     }
     av_log(NULL, AV_LOG_ERROR, "no stream to publish\n");
@@ -302,7 +497,7 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
     c->channel_layout = av_get_default_channel_layout(c->channels);
     c->sample_rate    = 8000;
     mAudioStream->time_base = (AVRational){ 1, c->sample_rate };
-    /*c->time_base             = mAudioStream->time_base;*/
+
     if (mContext->oformat->flags & AVFMT_GLOBALHEADER)
         c->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
@@ -318,9 +513,12 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
 
 int Muxer::writeVideoFrame(AVFrame* frame, int pts)
 {
+    if (mReader->read(frame) < 0)
+        return -1;
     AVPacket pkt = { 0 };
     av_init_packet(&pkt);
-    fill_yuv_image(frame, pts, mVideoStream->codec->width, mVideoStream->codec->height);
+    // fill_yuv_image(frame, pts, mVideoStream->codec->width, mVideoStream->codec->height);
+    mDisplay->render(frame);
     frame->pts = pts;
     int got_packet = 0;
     if (avcodec_encode_video2(mVideoStream->codec, &pkt, frame, &got_packet) < 0) {
@@ -420,9 +618,11 @@ int main(int argc, char **argv)
 {
     av_register_all();
     avformat_network_init();
+    avdevice_register_all();
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
     // av_log_set_level(AV_LOG_DEBUG);
 
-    // Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/bundle.sdp");
+    // Muxer* m = new Muxer("rtsp", "rtsp://webrtc:abc123@localhost:1935/live/bundle.sdp");
     Muxer* m = new Muxer(NULL, "abc.mkv");
     if (!m->start())
         return 1;
