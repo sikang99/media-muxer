@@ -7,7 +7,7 @@ LDFLAGS =
 LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswscale -lboost_system -lSDL
 
 ifeq ($(shell uname),Darwin)
-	LIBS += -lboost_thread-mt
+	LIBS += -lboost_thread-mt -lSDLmain -framework cocoa
 else
 	LIBS += -lboost_thread
 endif
