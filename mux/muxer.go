@@ -55,21 +55,15 @@ package mux
   }
   static AVFrame* alloc_video_frame(AVCodecContext* c)
   {
-      AVFrame *picture;
-
-      picture = av_frame_alloc();
+      AVFrame* picture = av_frame_alloc();
       if (!picture)
           return NULL;
-
+      if (!c)
+          return picture;
       picture->format = c->pix_fmt;
       picture->width  = c->width;
       picture->height = c->height;
-
-      if (av_frame_get_buffer(picture, 32) < 0) {
-          av_frame_free(&picture);
-          return NULL;
-      }
-
+      av_image_alloc(picture->data, picture->linesize, c->width, c->height, c->pix_fmt, 32);
       return picture;
   }
 
@@ -268,6 +262,10 @@ func (m *Muxer) Stop() {
 		C.avio_close(m.context.pb)
 	}
 	C.avformat_free_context(m.context)
+}
+
+func (m *Muxer) Close() {
+	m.Stop()
 }
 
 func (m *Muxer) WaitForDone() {

@@ -27,4 +27,5 @@ func main() {
 	if err == nil && m.Start() {
 		m.WaitForDone()
 	}
+	m.Close()
 }
