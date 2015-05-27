@@ -245,11 +245,14 @@ CameraReader::CameraReader(const std::string& device)
     , mFrame (NULL)
 {
     mContext = avformat_alloc_context();
+    AVDictionary* options = NULL;
+    av_dict_set(&options, "list_devices", "true", 0);
 #if defined linux
     AVInputFormat* ifmt = av_find_input_format("video4linux2");
 #else // Darwin
     AVInputFormat* ifmt = av_find_input_format("avfoundation");
 #endif
+    avformat_open_input(&mContext, NULL, ifmt, &options);
     if (avformat_open_input(&mContext, device.c_str(), ifmt, NULL) < 0) {
         av_log(NULL, AV_LOG_ERROR, "cannot open camera");
         return;
