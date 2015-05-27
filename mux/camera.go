@@ -2,11 +2,11 @@ package mux
 
 /*
 #cgo pkg-config: libavdevice libavformat libavcodec libavutil libswscale
+#cgo darwin LDFLAGS: -framework cocoa
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavdevice/avdevice.h>
 #include <libavutil/avstring.h>
-#include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
 */
 import "C"
@@ -33,7 +33,7 @@ func NewCamera(device string) (*Camera, error) {
 	defer C.free(unsafe.Pointer(driver))
 	ifmt := C.av_find_input_format(driver)
 	if ifmt == (*C.AVInputFormat)(null) {
-		return nil, fmt.Errorf("cannot find input driver")
+		return nil, fmt.Errorf("cannot find input driver: %s", DRIVER)
 	}
 	dev := C.CString(device)
 	defer C.free(unsafe.Pointer(dev))

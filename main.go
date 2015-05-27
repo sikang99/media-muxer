@@ -24,8 +24,12 @@ func main() {
 		format = "rtsp"
 	}
 	m, err := mux.NewMuxer(format, flag.Arg(0))
-	if err == nil && m.Start() {
-		m.WaitForDone()
+	if err == nil {
+		if m.Start() {
+			m.WaitForDone()
+		}
+		m.Close()
+	} else {
+		fmt.Println(err)
 	}
-	m.Close()
 }

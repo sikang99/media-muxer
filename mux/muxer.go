@@ -7,6 +7,7 @@ package mux
   #include <libavcodec/avcodec.h>
   #include <libavutil/avstring.h>
   #include <libavutil/channel_layout.h>
+  #include <libavutil/imgutils.h>
   #include <libavutil/mathematics.h>
   static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
   {
@@ -106,6 +107,9 @@ type Muxer struct {
 	audioStream Stream
 	videoStream Stream
 	done        chan bool
+
+	// input
+	camera *Camera
 }
 
 type Stream struct {
@@ -128,6 +132,10 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 		return nil, fmt.Errorf("output format not supported")
 	}
 	C.av_strlcpy(&m.context.filename[0], u, C.size_t(unsafe.Sizeof(m.context.filename)))
+	var err error
+	if m.camera, err = NewCamera("0"); err != nil {
+		return nil, err
+	}
 	return &m, nil
 }
 
@@ -196,9 +204,13 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 }
 
 func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
+	if m.camera.Read(frame) != nil {
+		return false
+	}
+
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
-	C.fill_yuv_image(frame, C.int(m.videoStream.ts), m.videoStream.stream.codec)
+	// C.fill_yuv_image(frame, C.int(m.videoStream.ts), m.videoStream.stream.codec)
 	frame.pts = C.int64_t(m.videoStream.ts)
 	m.videoStream.ts++
 	got_packet := C.int(0)
