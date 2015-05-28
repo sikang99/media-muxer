@@ -212,11 +212,11 @@ void Display::loop()
         if (mEvent.type == REFRESH_EVENT) {
             SDL_LockYUVOverlay(mBmp);
             mBmp->pixels[0] = mFrame->data[0];
-            mBmp->pixels[2] = mFrame->data[1];
-            mBmp->pixels[1] = mFrame->data[2];
+            mBmp->pixels[1] = mFrame->data[1];
+            mBmp->pixels[2] = mFrame->data[2];
             mBmp->pitches[0] = mFrame->linesize[0];
-            mBmp->pitches[2] = mFrame->linesize[1];
-            mBmp->pitches[1] = mFrame->linesize[2];
+            mBmp->pitches[1] = mFrame->linesize[1];
+            mBmp->pitches[2] = mFrame->linesize[2];
             SDL_UnlockYUVOverlay(mBmp);
             SDL_DisplayYUVOverlay(mBmp, &rect);
         } else if (mEvent.type == SDL_QUIT) {

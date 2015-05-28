@@ -27,7 +27,13 @@
 *.out
 *.app
 muxer
-abc.mkv
 *.dSYM
 mux/mux
 media-muxer
+
+# media files
+*.mkv
+*.avi
+*.mpg
+*.yuv
+*.webm
