@@ -26,74 +26,6 @@ static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
     return 0;
 }
 
-/* just pick the highest supported samplerate */
-// static int select_sample_rate(AVCodec *codec)
-// {
-//     const int *p;
-//     int best_samplerate = 0;
-
-//     if (!codec->supported_samplerates)
-//         return 44100;
-
-//     p = codec->supported_samplerates;
-//     while (*p) {
-//         best_samplerate = FFMAX(*p, best_samplerate);
-//         p++;
-//     }
-//     return best_samplerate;
-// }
-
-/* select layout with the highest channel count */
-// static int select_channel_layout(AVCodec *codec)
-// {
-//     const uint64_t *p;
-//     uint64_t best_ch_layout = 0;
-//     int best_nb_channels   = 0;
-
-//     if (!codec->channel_layouts)
-//         return AV_CH_LAYOUT_STEREO;
-
-//     p = codec->channel_layouts;
-//     while (*p) {
-//         int nb_channels = av_get_channel_layout_nb_channels(*p);
-
-//         if (nb_channels > best_nb_channels) {
-//             best_ch_layout    = *p;
-//             best_nb_channels = nb_channels;
-//         }
-//         p++;
-//     }
-//     return best_ch_layout;
-// }
-
-// static void fill_yuv_image(AVFrame *pict, int frame_index, int width, int height)
-// {
-//     int x, y, i, ret;
-
-//     /* when we pass a frame to the encoder, it may keep a reference to it
-//      * internally;
-//      * make sure we do not overwrite it here
-//      */
-//     ret = av_frame_make_writable(pict);
-//     if (ret < 0)
-//         exit(1);
-
-//     i = frame_index;
-
-//     /* Y */
-//     for (y = 0; y < height; y++)
-//         for (x = 0; x < width; x++)
-//             pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
-
-//     /* Cb and Cr */
-//     for (y = 0; y < height / 2; y++) {
-//         for (x = 0; x < width / 2; x++) {
-//             pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
-//             pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
-//         }
-//     }
-// }
-
 static AVFrame* alloc_video_frame(AVCodecContext* c)
 {
     AVFrame *picture;
@@ -150,19 +82,19 @@ static AVFrame* alloc_audio_frame(AVCodecContext* c, uint8_t** buffer)
 
 class Display {
 public:
-    Display(const std::string&, AVCodecContext*);
+    Display(const std::string&, int, int);
     virtual ~Display();
     void render(AVFrame*);
     const bool getStatus() const {return mRendering;}
     void start();
     void stop();
 private:
-    AVCodecContext* mCodec;
     SDL_Surface* mScreen;
     SDL_Overlay* mBmp;
     SDL_Event mEvent;
     AVFrame* mFrame;
     bool mRendering;
+    int mWidth, mHeight;
     boost::thread mThread;
     void loop();
 };
@@ -186,12 +118,13 @@ void Display::stop()
     mThread.join();
 }
 
-Display::Display(const std::string& title, AVCodecContext* ctx)
-    : mCodec (ctx)
-    , mRendering (false)
+Display::Display(const std::string& title, int width, int height)
+    : mRendering (false)
+    , mWidth (width)
+    , mHeight (height)
 {
-    mScreen = SDL_SetVideoMode(ctx->width, ctx->height, 0, 0);
-    mBmp = SDL_CreateYUVOverlay(ctx->width, ctx->height, SDL_IYUV_OVERLAY, mScreen);
+    mScreen = SDL_SetVideoMode(mWidth, mHeight, 0, 0);
+    mBmp = SDL_CreateYUVOverlay(mWidth, mHeight, SDL_IYUV_OVERLAY, mScreen);
     SDL_WM_SetCaption(title.c_str(), NULL);
 }
 
@@ -205,8 +138,8 @@ void Display::loop()
     SDL_Rect rect;
     rect.x = 0;
     rect.y = 0;
-    rect.w = mCodec->width;
-    rect.h = mCodec->height;
+    rect.w = mWidth;
+    rect.h = mHeight;
     while (mRendering) {
         SDL_WaitEvent(&mEvent);
         if (mEvent.type == REFRESH_EVENT) {
@@ -230,7 +163,8 @@ class CameraReader {
 public:
     CameraReader(const std::string&);
     virtual ~CameraReader();
-    AVCodecContext* getCodec() {return mContext->streams[mIndex]->codec;}
+    const int width() const {return mDecoder->width;}
+    const int height() const {return mDecoder->height;}
     int read(AVFrame*);
 private:
     int mIndex;
@@ -351,7 +285,7 @@ private:
     Display* mDisplay;
 
     bool addAudioStream(enum AVCodecID);
-    bool addVideoStream(enum AVCodecID);
+    bool addVideoStream(enum AVCodecID, int, int);
     int writeAudioFrame(AVFrame*, int, uint8_t*);
     int writeVideoFrame(AVFrame*, int);
     void loop();
@@ -386,7 +320,7 @@ Muxer::Muxer(const char* fmt, const std::string& uri)
 #else // Darwin
     mReader = new CameraReader("0");
 #endif
-    mDisplay = new Display("Camera", mReader->getCodec());
+    mDisplay = new Display("Camera", mReader->width(), mReader->height());
 }
 
 Muxer::~Muxer()
@@ -410,7 +344,7 @@ void Muxer::stop()
 }
 
 bool Muxer::start() {
-    if (addVideoStream(AV_CODEC_ID_H264))
+    if (addVideoStream(AV_CODEC_ID_H264, mReader->width(), mReader->height()))
         mHasVideo = true;
     if (addAudioStream(AV_CODEC_ID_PCM_MULAW))
         mHasAudio = true;
@@ -433,7 +367,7 @@ bool Muxer::start() {
     return false;
 }
 
-bool Muxer::addVideoStream(enum AVCodecID codecId)
+bool Muxer::addVideoStream(enum AVCodecID codecId, int width, int height)
 {
     AVCodec* codec = avcodec_find_encoder(codecId);
     if (!codec) {
@@ -450,11 +384,10 @@ bool Muxer::addVideoStream(enum AVCodecID codecId)
     AVCodecContext* c = mVideoStream->codec;
     c->codec_id = codecId;
     c->codec_type = AVMEDIA_TYPE_VIDEO;
-    /* Put sample parameters. */
-    c->bit_rate = 400000;
+    c->bit_rate = 400000; //TODO: calculate
     /* Resolution must be a multiple of two. */
-    c->width    = 640;
-    c->height   = 480;
+    c->width    = width;
+    c->height   = height;
     /* timebase: This is the fundamental unit of time (in seconds) in terms
      * of which frame timestamps are represented. For fixed-fps content,
      * timebase should be 1/framerate and timestamp increments should be
