@@ -46,9 +46,10 @@ func NewCamera(device string) (*Camera, error) {
 	}
 	num := int(camera.context.nb_streams)
 	streams := (*[1 << 30]*C.AVStream)(unsafe.Pointer(camera.context.streams))
+	var deCtx *C.AVCodecContext
 	for i := 0; i < num; i++ {
 		if streams[i].codec.codec_type == C.AVMEDIA_TYPE_VIDEO {
-			camera.codec = streams[i].codec
+			deCtx = streams[i].codec
 			camera.index = i
 			break
 		}
@@ -56,9 +57,13 @@ func NewCamera(device string) (*Camera, error) {
 	if camera.index == -1 {
 		return nil, fmt.Errorf("cannot find video stream")
 	}
-	codec := C.avcodec_find_decoder(camera.codec.codec_id)
+	codec := C.avcodec_find_decoder(deCtx.codec_id)
 	if codec == (*C.AVCodec)(null) {
 		return nil, fmt.Errorf("cannot find decode codec")
+	}
+	camera.codec = C.avcodec_alloc_context3(codec)
+	if C.avcodec_copy_context(camera.codec, deCtx) != 0 {
+		return nil, fmt.Errorf("cannot copy codec context")
 	}
 	if C.avcodec_open2(camera.codec, codec, (**C.struct_AVDictionary)(null)) < 0 {
 		return nil, fmt.Errorf("cannot open decode codec")
