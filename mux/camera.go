@@ -111,6 +111,10 @@ func (id *Camera) Read(frame *C.AVFrame) error {
 	return fmt.Errorf("no frame out")
 }
 
+func (id *Camera) Resolution() (int, int) {
+	return int(id.codec.width), int(id.codec.height)
+}
+
 func init() {
 	C.avdevice_register_all()
 }

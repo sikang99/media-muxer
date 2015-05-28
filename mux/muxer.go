@@ -118,11 +118,12 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 	if m.camera, err = NewCamera("0"); err != nil {
 		return nil, err
 	}
-	m.display, _ = NewDisplay("Camera", 640, 480)
+	w, h := m.camera.Resolution()
+	m.display, _ = NewDisplay("Camera", w, h)
 	return &m, nil
 }
 
-func (m *Muxer) AddVideoStream(codecId uint32) bool {
+func (m *Muxer) AddVideoStream(codecId uint32, width, height int) bool {
 	codec := C.avcodec_find_encoder(codecId)
 	if codec == (*C.AVCodec)(null) {
 		return false
@@ -137,8 +138,8 @@ func (m *Muxer) AddVideoStream(codecId uint32) bool {
 	c.codec_id = codecId
 	c.codec_type = C.AVMEDIA_TYPE_VIDEO
 	c.bit_rate = 400000
-	c.width = 640
-	c.height = 480
+	c.width = C.int(width)
+	c.height = C.int(height)
 	m.videoStream.stream.time_base = C.AVRational{1, 30}
 	c.time_base = m.videoStream.stream.time_base
 	c.gop_size = 12
@@ -190,9 +191,7 @@ func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 	if m.camera.Read(frame) != nil {
 		return false
 	}
-	{
-		m.display.Render(frame)
-	}
+	m.display.Render(frame)
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
 	frame.pts = C.int64_t(m.videoStream.ts)
@@ -230,7 +229,8 @@ func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
 }
 
 func (m *Muxer) Start() bool {
-	if !m.AddVideoStream(C.AV_CODEC_ID_H264) {
+	w, h := m.camera.Resolution()
+	if !m.AddVideoStream(C.AV_CODEC_ID_H264, w, h) {
 		return false
 	}
 	if !m.AddAudioStream(C.AV_CODEC_ID_PCM_MULAW) {
