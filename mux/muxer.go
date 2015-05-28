@@ -252,7 +252,7 @@ func (m *Muxer) Start() bool {
 }
 
 func (m *Muxer) Stop() {
-	m.loop = true
+	m.loop = false
 	C.av_write_trailer(m.context)
 	C.avcodec_close(m.videoStream.stream.codec)
 	C.avcodec_close(m.audioStream.stream.codec)
@@ -263,6 +263,8 @@ func (m *Muxer) Stop() {
 }
 
 func (m *Muxer) Close() {
+	m.display.Close()
+	m.camera.Close()
 	m.Stop()
 }
 
