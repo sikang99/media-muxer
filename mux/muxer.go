@@ -20,27 +20,6 @@ package mux
       }
       return 0;
   }
-  static void fill_yuv_image(AVFrame *pict, int frame_index, AVCodecContext *c)
-  {
-      int x, y, i, ret;
-
-      ret = av_frame_make_writable(pict);
-      if (ret < 0)
-          exit(1);
-
-      i = frame_index;
-
-      for (y = 0; y < c->height; y++)
-          for (x = 0; x < c->width; x++)
-              pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
-
-      for (y = 0; y < c->height / 2; y++) {
-          for (x = 0; x < c->width / 2; x++) {
-              pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
-              pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
-          }
-      }
-  }
   static void fill_audio_frame(AVFrame* frame, AVCodecContext *c)
   {
     float t = 0, tincr = 2 * M_PI * 110.0 / c->sample_rate, tincr2 = 2 * M_PI * 110.0 / c->sample_rate / c->sample_rate;
@@ -103,11 +82,12 @@ var (
 )
 
 type Muxer struct {
+	done chan bool
+	loop bool
+	// output
 	context     *C.AVFormatContext
 	audioStream Stream
 	videoStream Stream
-	done        chan bool
-
 	// input
 	camera *Camera
 }
@@ -210,7 +190,6 @@ func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
-	// C.fill_yuv_image(frame, C.int(m.videoStream.ts), m.videoStream.stream.codec)
 	frame.pts = C.int64_t(m.videoStream.ts)
 	m.videoStream.ts++
 	got_packet := C.int(0)
@@ -261,12 +240,13 @@ func (m *Muxer) Start() bool {
 	if C.avformat_write_header(m.context, (**C.AVDictionary)(null)) < 0 {
 		return false
 	}
+	m.loop = true
 	go m.routine()
 	return true
 }
 
 func (m *Muxer) Stop() {
-	m.done <- true
+	m.loop = true
 	C.av_write_trailer(m.context)
 	C.avcodec_close(m.videoStream.stream.codec)
 	C.avcodec_close(m.audioStream.stream.codec)
@@ -304,7 +284,7 @@ func (m *Muxer) routine() {
 		m.done <- true
 		return
 	}
-	for {
+	for m.loop {
 		if C.av_compare_ts(C.int64_t(m.videoStream.ts), m.videoStream.stream.codec.time_base,
 			C.int64_t(m.audioStream.ts), m.audioStream.stream.codec.time_base) <= 0 {
 			m.writeVideoFrame(vFrame)
@@ -319,10 +299,10 @@ func (m *Muxer) routine() {
 	if aFrame != (*C.AVFrame)(null) {
 		C.av_frame_free(&aFrame)
 	}
+	m.done <- true
 }
 
 func init() {
 	C.av_register_all()
 	C.avformat_network_init()
-	// C.av_log_set_level(C.AV_LOG_DEBUG)
 }

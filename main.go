@@ -33,3 +33,7 @@ func main() {
 		fmt.Println(err)
 	}
 }
+
+func init() {
+	// C.av_log_set_level(C.AV_LOG_DEBUG)
+}
