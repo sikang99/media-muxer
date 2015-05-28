@@ -235,6 +235,7 @@ public:
 private:
     int mIndex;
     AVFormatContext* mContext;
+    AVCodecContext* mDecoder;
     struct SwsContext* mSwsCtx;
     AVFrame* mFrame; // rgb
 };
@@ -275,28 +276,32 @@ CameraReader::CameraReader(const std::string& device)
         av_log(NULL, AV_LOG_ERROR, "cannot find decode codec");
         return;
     }
-    if (avcodec_open2(mContext->streams[mIndex]->codec, codec, NULL) < 0) {
+    mDecoder = avcodec_alloc_context3(codec);
+    if (avcodec_copy_context(mDecoder, mContext->streams[mIndex]->codec) != 0) {
+        av_log(NULL, AV_LOG_ERROR, "cannot copy codec context");
+        return;
+    }
+    if (avcodec_open2(mDecoder, codec, NULL) < 0) {
         av_log(NULL, AV_LOG_ERROR, "cannot open decode codec");
         return;
     }
-    mSwsCtx = sws_getContext(mContext->streams[mIndex]->codec->width,
-        mContext->streams[mIndex]->codec->height,
-        mContext->streams[mIndex]->codec->pix_fmt,
-        mContext->streams[mIndex]->codec->width,
-        mContext->streams[mIndex]->codec->height,
+    mSwsCtx = sws_getContext(mDecoder->width,
+        mDecoder->height,
+        mDecoder->pix_fmt,
+        mDecoder->width,
+        mDecoder->height,
         AV_PIX_FMT_YUV420P, SWS_BILINEAR, NULL, NULL, NULL);
 
     mFrame = av_frame_alloc();
-    av_log(NULL, AV_LOG_DEBUG, "camera - video codec=%s\n", avcodec_descriptor_get(mContext->streams[mIndex]->codec->codec_id)->name);
-    av_log(NULL, AV_LOG_DEBUG, "camera - video width=%d, height=%d\n", mContext->streams[mIndex]->codec->width, mContext->streams[mIndex]->codec->height);
+    av_log(NULL, AV_LOG_DEBUG, "camera - video codec=%s\n", avcodec_descriptor_get(mDecoder->codec_id)->name);
+    av_log(NULL, AV_LOG_DEBUG, "camera - video width=%d, height=%d\n", mDecoder->width, mDecoder->height);
 }
 
 CameraReader::~CameraReader()
 {
     av_frame_free(&mFrame);
-    AVCodecContext* c = mContext->streams[mIndex]->codec;
-    if (c)
-        avcodec_close(c);
+    if (mDecoder)
+        avcodec_close(mDecoder);
     avformat_close_input(&mContext);
     sws_freeContext(mSwsCtx);
 }
@@ -316,14 +321,14 @@ int CameraReader::read(AVFrame* frame)
         return -1;
     }
     int got_frame = 0;
-    ret = avcodec_decode_video2(mContext->streams[mIndex]->codec, mFrame, &got_frame, &pkt);
+    ret = avcodec_decode_video2(mDecoder, mFrame, &got_frame, &pkt);
     av_free_packet(&pkt);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "decode frame error");
         return ret;
     }
     if (got_frame) {
-        sws_scale(mSwsCtx, const_cast<const uint8_t**>(mFrame->data), mFrame->linesize, 0, mContext->streams[mIndex]->codec->height, frame->data, frame->linesize);
+        sws_scale(mSwsCtx, const_cast<const uint8_t**>(mFrame->data), mFrame->linesize, 0, mDecoder->height, frame->data, frame->linesize);
         return 0;
     }
     return -1;
