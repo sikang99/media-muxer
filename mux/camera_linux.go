@@ -3,5 +3,6 @@
 package mux
 
 const (
-	DRIVER = "video4linux2"
+	_DRIVER        = "video4linux2"
+	_DEVICE_PREFIX = "/dev/video"
 )

@@ -3,5 +3,6 @@
 package mux
 
 const (
-	DRIVER = "avfoundation"
+	_DRIVER        = "avfoundation"
+	_DEVICE_PREFIX = ""
 )

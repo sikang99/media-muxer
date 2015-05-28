@@ -29,12 +29,13 @@ func NewCamera(device string) (*Camera, error) {
 	if camera.context == (*C.AVFormatContext)(null) {
 		return nil, fmt.Errorf("allocate output format context failed")
 	}
-	driver := C.CString(DRIVER)
+	driver := C.CString(_DRIVER)
 	defer C.free(unsafe.Pointer(driver))
 	ifmt := C.av_find_input_format(driver)
 	if ifmt == (*C.AVInputFormat)(null) {
-		return nil, fmt.Errorf("cannot find input driver: %s", DRIVER)
+		return nil, fmt.Errorf("cannot find input driver: %s", _DRIVER)
 	}
+	device = _DEVICE_PREFIX + device
 	dev := C.CString(device)
 	defer C.free(unsafe.Pointer(dev))
 	if C.avformat_open_input(&(camera.context), dev, ifmt, (**C.AVDictionary)(null)) < 0 {
@@ -101,4 +102,8 @@ func (id *Camera) Read(frame *C.AVFrame) error {
 		return nil
 	}
 	return fmt.Errorf("no frame out")
+}
+
+func init() {
+	C.avdevice_register_all()
 }
