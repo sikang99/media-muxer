@@ -90,6 +90,8 @@ type Muxer struct {
 	videoStream Stream
 	// input
 	camera *Camera
+	// display
+	display *Display
 }
 
 type Stream struct {
@@ -116,6 +118,7 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 	if m.camera, err = NewCamera("0"); err != nil {
 		return nil, err
 	}
+	m.display, _ = NewDisplay("Camera", 640, 480)
 	return &m, nil
 }
 
@@ -187,7 +190,9 @@ func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 	if m.camera.Read(frame) != nil {
 		return false
 	}
-
+	{
+		m.display.Render(frame)
+	}
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
 	frame.pts = C.int64_t(m.videoStream.ts)
@@ -242,6 +247,7 @@ func (m *Muxer) Start() bool {
 	}
 	m.loop = true
 	go m.routine()
+	m.display.Open()
 	return true
 }
 

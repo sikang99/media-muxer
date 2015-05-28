@@ -103,8 +103,10 @@ func (id *Camera) Read(frame *C.AVFrame) error {
 		return fmt.Errorf("decode frame error")
 	}
 	if got_frame != 0 {
-		C.sws_scale(id.sws, (**C.uint8_t)(&(id.frame.data[0])), &id.frame.linesize[0], 0, id.codec.height, &frame.data[0], &frame.linesize[0])
-		return nil
+		if C.sws_scale(id.sws, (**C.uint8_t)(&(id.frame.data[0])), &id.frame.linesize[0], 0, id.codec.height, &frame.data[0], &frame.linesize[0]) >= 0 {
+			return nil
+		}
+		return fmt.Errorf("scale error")
 	}
 	return fmt.Errorf("no frame out")
 }
