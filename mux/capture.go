@@ -15,18 +15,19 @@ import (
 	"unsafe"
 )
 
-type Camera struct {
+type Capture struct {
 	context *C.AVFormatContext
 	frame   *C.AVFrame
 	codec   *C.AVCodecContext
 	sws     *C.struct_SwsContext
 	index   int
+	//TODO: add audio capture
 }
 
-func NewCamera(device string) (*Camera, error) {
-	camera := Camera{index: -1}
-	camera.context = C.avformat_alloc_context()
-	if camera.context == (*C.AVFormatContext)(null) {
+func NewCapture(device string) (*Capture, error) {
+	id := Capture{index: -1}
+	id.context = C.avformat_alloc_context()
+	if id.context == (*C.AVFormatContext)(null) {
 		return nil, fmt.Errorf("allocate output format context failed")
 	}
 	driver := C.CString(_DRIVER)
@@ -38,54 +39,54 @@ func NewCamera(device string) (*Camera, error) {
 	device = _DEVICE_PREFIX + device
 	dev := C.CString(device)
 	defer C.free(unsafe.Pointer(dev))
-	if C.avformat_open_input(&(camera.context), dev, ifmt, (**C.AVDictionary)(null)) < 0 {
+	if C.avformat_open_input(&(id.context), dev, ifmt, (**C.AVDictionary)(null)) < 0 {
 		return nil, fmt.Errorf("cannot open device %s", device)
 	}
-	if C.avformat_find_stream_info(camera.context, (**C.AVDictionary)(null)) < 0 {
+	if C.avformat_find_stream_info(id.context, (**C.AVDictionary)(null)) < 0 {
 		return nil, fmt.Errorf("cannot find stream information")
 	}
-	num := int(camera.context.nb_streams)
-	streams := (*[1 << 30]*C.AVStream)(unsafe.Pointer(camera.context.streams))
+	num := int(id.context.nb_streams)
+	streams := (*[1 << 30]*C.AVStream)(unsafe.Pointer(id.context.streams))
 	var deCtx *C.AVCodecContext
 	for i := 0; i < num; i++ {
 		if streams[i].codec.codec_type == C.AVMEDIA_TYPE_VIDEO {
 			deCtx = streams[i].codec
-			camera.index = i
+			id.index = i
 			break
 		}
 	}
-	if camera.index == -1 {
+	if id.index == -1 {
 		return nil, fmt.Errorf("cannot find video stream")
 	}
 	codec := C.avcodec_find_decoder(deCtx.codec_id)
 	if codec == (*C.AVCodec)(null) {
 		return nil, fmt.Errorf("cannot find decode codec")
 	}
-	camera.codec = C.avcodec_alloc_context3(codec)
-	if C.avcodec_copy_context(camera.codec, deCtx) != 0 {
+	id.codec = C.avcodec_alloc_context3(codec)
+	if C.avcodec_copy_context(id.codec, deCtx) != 0 {
 		return nil, fmt.Errorf("cannot copy codec context")
 	}
-	if C.avcodec_open2(camera.codec, codec, (**C.struct_AVDictionary)(null)) < 0 {
+	if C.avcodec_open2(id.codec, codec, (**C.struct_AVDictionary)(null)) < 0 {
 		return nil, fmt.Errorf("cannot open decode codec")
 	}
-	camera.sws = C.sws_getContext(camera.codec.width,
-		camera.codec.height,
-		camera.codec.pix_fmt,
-		camera.codec.width,
-		camera.codec.height,
+	id.sws = C.sws_getContext(id.codec.width,
+		id.codec.height,
+		id.codec.pix_fmt,
+		id.codec.width,
+		id.codec.height,
 		C.AV_PIX_FMT_YUV420P, C.SWS_BILINEAR, (*C.struct_SwsFilter)(null), (*C.struct_SwsFilter)(null), (*C.double)(null))
-	camera.frame = C.av_frame_alloc()
-	return &camera, nil
+	id.frame = C.av_frame_alloc()
+	return &id, nil
 }
 
-func (id *Camera) Close() {
+func (id *Capture) Close() {
 	C.av_frame_free(&(id.frame))
 	C.avcodec_close(id.codec)
 	C.avformat_close_input(&(id.context))
 	C.sws_freeContext(id.sws)
 }
 
-func (id *Camera) Read(frame *C.AVFrame) error {
+func (id *Capture) Read(frame *C.AVFrame) error {
 	if frame == (*C.AVFrame)(null) {
 		return fmt.Errorf("buffer error")
 	}
@@ -111,7 +112,7 @@ func (id *Camera) Read(frame *C.AVFrame) error {
 	return fmt.Errorf("no frame out")
 }
 
-func (id *Camera) Resolution() (int, int) {
+func (id *Capture) Resolution() (int, int) {
 	return int(id.codec.width), int(id.codec.height)
 }
 

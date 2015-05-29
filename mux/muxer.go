@@ -89,7 +89,7 @@ type Muxer struct {
 	audioStream Stream
 	videoStream Stream
 	// input
-	camera *Camera
+	capture *Capture
 	// display
 	display *Display
 }
@@ -115,10 +115,10 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 	}
 	C.av_strlcpy(&m.context.filename[0], u, C.size_t(unsafe.Sizeof(m.context.filename)))
 	var err error
-	if m.camera, err = NewCamera("0"); err != nil {
+	if m.capture, err = NewCapture("0"); err != nil {
 		return nil, err
 	}
-	w, h := m.camera.Resolution()
+	w, h := m.capture.Resolution()
 	m.display, _ = NewDisplay("Camera", w, h)
 	return &m, nil
 }
@@ -188,7 +188,7 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 }
 
 func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
-	if m.camera.Read(frame) != nil {
+	if m.capture.Read(frame) != nil {
 		return false
 	}
 	m.display.Render(frame)
@@ -229,7 +229,7 @@ func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
 }
 
 func (m *Muxer) Start() bool {
-	w, h := m.camera.Resolution()
+	w, h := m.capture.Resolution()
 	if !m.AddVideoStream(C.AV_CODEC_ID_H264, w, h) {
 		return false
 	}
@@ -264,7 +264,7 @@ func (m *Muxer) Stop() {
 
 func (m *Muxer) Close() {
 	m.display.Close()
-	m.camera.Close()
+	m.capture.Close()
 	m.Stop()
 }
 
