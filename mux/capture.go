@@ -24,19 +24,18 @@ type Capture struct {
 	//TODO: add audio capture
 }
 
-func NewCapture(device string) (*Capture, error) {
+func NewCapture(driver, device string) (*Capture, error) {
 	id := Capture{index: -1}
 	id.context = C.avformat_alloc_context()
 	if id.context == (*C.AVFormatContext)(null) {
 		return nil, fmt.Errorf("allocate output format context failed")
 	}
-	driver := C.CString(_DRIVER)
-	defer C.free(unsafe.Pointer(driver))
-	ifmt := C.av_find_input_format(driver)
+	_driver := C.CString(driver)
+	defer C.free(unsafe.Pointer(_driver))
+	ifmt := C.av_find_input_format(_driver)
 	if ifmt == (*C.AVInputFormat)(null) {
-		return nil, fmt.Errorf("cannot find input driver: %s", _DRIVER)
+		return nil, fmt.Errorf("cannot find input driver: %s", driver)
 	}
-	device = _DEVICE_PREFIX + device
 	dev := C.CString(device)
 	defer C.free(unsafe.Pointer(dev))
 	if C.avformat_open_input(&(id.context), dev, ifmt, (**C.AVDictionary)(null)) < 0 {

@@ -9,9 +9,13 @@ import (
 )
 
 func main() {
+	var driver, device string
+	flag.StringVar(&driver, "driver", DRIVER, "set capture driver")
+	flag.StringVar(&device, "device", DEVICE, "set capture device")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Println("no thing to mux")
+		flag.Usage()
 		return
 	}
 	uri, err := url.Parse(flag.Arg(0))
@@ -23,7 +27,8 @@ func main() {
 	if uri.Scheme == "rtsp" {
 		format = "rtsp"
 	}
-	m, err := mux.NewMuxer(format, flag.Arg(0))
+	media := mux.MediaSource{mux.NewVideoSource(driver, device), &(mux.AudioSource{})}
+	m, err := mux.NewMuxer(&media, format, flag.Arg(0))
 	if err == nil {
 		if m.Start() {
 			m.WaitForDone()

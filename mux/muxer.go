@@ -99,7 +99,22 @@ type Stream struct {
 	ts     int
 }
 
-func NewMuxer(format, uri string) (*Muxer, error) {
+type VideoSource struct {
+	driver, device string
+}
+
+func NewVideoSource(driver, device string) *VideoSource {
+	return &VideoSource{driver, device}
+}
+
+type AudioSource struct{}
+
+type MediaSource struct {
+	Video *VideoSource
+	Audio *AudioSource
+}
+
+func NewMuxer(source *MediaSource, format, uri string) (*Muxer, error) {
 	m := Muxer{done: make(chan bool)}
 	m.context = C.avformat_alloc_context()
 	if m.context == (*C.AVFormatContext)(null) {
@@ -115,7 +130,7 @@ func NewMuxer(format, uri string) (*Muxer, error) {
 	}
 	C.av_strlcpy(&m.context.filename[0], u, C.size_t(unsafe.Sizeof(m.context.filename)))
 	var err error
-	if m.capture, err = NewCapture("0"); err != nil {
+	if m.capture, err = NewCapture(source.Video.driver, source.Video.device); err != nil {
 		return nil, err
 	}
 	w, h := m.capture.Resolution()
