@@ -133,9 +133,22 @@ func NewMuxer(source *MediaSource, format, uri string) (*Muxer, error) {
 	if m.capture, err = NewCapture(source.Video.driver, source.Video.device); err != nil {
 		return nil, err
 	}
+	return &m, nil
+}
+
+func (m *Muxer) EnableDisplay() {
+	if m.display != nil {
+		return
+	}
 	w, h := m.capture.Resolution()
 	m.display, _ = NewDisplay("Camera", w, h)
-	return &m, nil
+}
+
+func (m *Muxer) DisableDisplay() {
+	if m.display != nil {
+		m.display.Close()
+		m.display = nil
+	}
 }
 
 func (m *Muxer) AddVideoStream(codecId uint32, width, height int) bool {
@@ -206,7 +219,9 @@ func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 	if m.capture.Read(frame) != nil {
 		return false
 	}
-	m.display.Render(frame)
+	if m.display != nil {
+		m.display.Render(frame)
+	}
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
 	frame.pts = C.int64_t(m.videoStream.ts)
@@ -262,7 +277,9 @@ func (m *Muxer) Start() bool {
 	}
 	m.loop = true
 	go m.routine()
-	m.display.Open()
+	if m.display != nil {
+		m.display.Open()
+	}
 	return true
 }
 
@@ -278,7 +295,9 @@ func (m *Muxer) Stop() {
 }
 
 func (m *Muxer) Close() {
-	m.display.Close()
+	if m.display != nil {
+		m.display.Close()
+	}
 	m.capture.Close()
 	m.Stop()
 }

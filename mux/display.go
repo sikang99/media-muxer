@@ -1,8 +1,7 @@
 package mux
 
 /*
-#cgo linux LDFLAGS: -lSDL
-#cgo darwin LDFLAGS: -lSDL -lSDLmain
+#cgo LDFLAGS: -lSDL
 #include <libavcodec/avcodec.h>
 #include <SDL/SDL.h>
 */

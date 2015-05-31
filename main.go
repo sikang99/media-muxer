@@ -10,8 +10,10 @@ import (
 
 func main() {
 	var driver, device string
+	var display bool = false
 	flag.StringVar(&driver, "driver", DRIVER, "set capture driver")
 	flag.StringVar(&device, "device", DEVICE, "set capture device")
+	flag.BoolVar(&display, "display", false, "enable sdl display")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Println("no thing to mux")
@@ -30,6 +32,9 @@ func main() {
 	media := mux.MediaSource{mux.NewVideoSource(driver, device), &(mux.AudioSource{})}
 	m, err := mux.NewMuxer(&media, format, flag.Arg(0))
 	if err == nil {
+		if display {
+			m.EnableDisplay()
+		}
 		if m.Start() {
 			m.WaitForDone()
 		}
