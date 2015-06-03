@@ -35,7 +35,7 @@ func main() {
 		if display {
 			m.EnableDisplay()
 		}
-		if m.Start() {
+		if m.Open() {
 			m.WaitForDone()
 		}
 		m.Close()

@@ -81,9 +81,12 @@ var (
 	null = unsafe.Pointer(uintptr(0))
 )
 
+type reclaimer func()
+
 type Muxer struct {
 	done chan bool
 	loop bool
+	recl []reclaimer
 	// output
 	context     *C.AVFormatContext
 	audioStream Stream
@@ -115,11 +118,14 @@ type MediaSource struct {
 }
 
 func NewMuxer(source *MediaSource, format, uri string) (*Muxer, error) {
-	m := Muxer{done: make(chan bool)}
+	m := Muxer{done: make(chan bool), recl: make([]reclaimer, 0, 8)}
 	m.context = C.avformat_alloc_context()
 	if m.context == (*C.AVFormatContext)(null) {
 		return nil, fmt.Errorf("allocate output format context failed")
 	}
+	m.recl = append(m.recl, func() {
+		C.avformat_free_context(m.context)
+	})
 	var f *C.char = C.CString(format)
 	var u *C.char = C.CString(uri)
 	defer C.free(unsafe.Pointer(f))
@@ -178,6 +184,9 @@ func (m *Muxer) AddVideoStream(codecId uint32, width, height int) bool {
 	if C.avcodec_open2(c, (*C.AVCodec)(null), (**C.AVDictionary)(null)) < 0 {
 		return false
 	}
+	m.recl = append(m.recl, func() {
+		C.avcodec_close(c)
+	})
 	return true
 }
 
@@ -209,6 +218,9 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 	if C.avcodec_open2(c, (*C.AVCodec)(null), (**C.AVDictionary)(null)) < 0 {
 		return false
 	}
+	m.recl = append(m.recl, func() {
+		C.avcodec_close(c)
+	})
 	if c.codec.capabilities&C.CODEC_CAP_VARIABLE_FRAME_SIZE != 0 {
 		c.frame_size = 10000
 	}
@@ -258,7 +270,7 @@ func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
 	return C.av_interleaved_write_frame(m.context, &pkt) == 0
 }
 
-func (m *Muxer) Start() bool {
+func (m *Muxer) Open() bool {
 	w, h := m.capture.Resolution()
 	if !m.AddVideoStream(C.AV_CODEC_ID_H264, w, h) {
 		return false
@@ -270,11 +282,17 @@ func (m *Muxer) Start() bool {
 		if C.avio_open(&m.context.pb, &m.context.filename[0], C.AVIO_FLAG_WRITE) < 0 {
 			return false
 		}
+		m.recl = append(m.recl, func() {
+			C.avio_close(m.context.pb)
+		})
 	}
 	C.av_dump_format(m.context, 0, &m.context.filename[0], 1)
 	if C.avformat_write_header(m.context, (**C.AVDictionary)(null)) < 0 {
 		return false
 	}
+	m.recl = append(m.recl, func() {
+		C.av_write_trailer(m.context)
+	})
 	m.loop = true
 	go m.routine()
 	if m.display != nil {
@@ -283,23 +301,15 @@ func (m *Muxer) Start() bool {
 	return true
 }
 
-func (m *Muxer) Stop() {
-	m.loop = false
-	C.av_write_trailer(m.context)
-	C.avcodec_close(m.videoStream.stream.codec)
-	C.avcodec_close(m.audioStream.stream.codec)
-	if m.context.oformat.flags&C.AVFMT_NOFILE == 0 {
-		C.avio_close(m.context.pb)
-	}
-	C.avformat_free_context(m.context)
-}
-
 func (m *Muxer) Close() {
 	if m.display != nil {
 		m.display.Close()
 	}
 	m.capture.Close()
-	m.Stop()
+	m.loop = false
+	for i := len(m.recl) - 1; i >= 0; i-- { // reclaim resources
+		m.recl[i]()
+	}
 }
 
 func (m *Muxer) WaitForDone() {
