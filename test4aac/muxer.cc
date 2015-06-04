@@ -27,10 +27,6 @@ extern "C" {
 
 #define PCMU_INDEX  59
 
-#define AAC_INDEX  238
-
-static int g_index = 0;
-static int g_index_aac = 0;
 static int g_pcmu_index = 0;
 
 using namespace std;
@@ -157,7 +153,7 @@ static int open_input_file(const char* filename,
     int error;
 
 // only for testing, let ffmpeg engin to initilizaiton AVContext by analzing the supplied input pcmu file
-#if 1
+#ifdef FAKE_PCMU
     /** Open the input file to read from it. */
     if ((error = avformat_open_input(input_format_context, filename, NULL,
                                      NULL)) < 0) {
@@ -405,7 +401,7 @@ static int decode_audio_frame(AVFrame *frame,
     int error;
     init_packet(&input_packet);
 
-#if 1
+#ifdef FAKE_PCMU
 // do only once for initializing the input_format_context which can be used to decode our PCMU buffer
 if (g_pcmu_index == 0) {
     /** Read one audio frame from the input file into a temporary packet. */
@@ -430,7 +426,7 @@ if (g_pcmu_index == 0) {
 
   {
     int size = audioPCMUData->getAudioSize();
-    printf("prepared packet size = %d\n", size);
+    // printf("prepared packet size = %d\n", size);
     input_packet.data     = (unsigned char*)audioPCMUData->getAudioData();//buf->data;
     input_packet.size     = size;
   }
@@ -695,23 +691,14 @@ static int encode_audio_frame(AVFrame *frame,
 
     /** Write one audio frame from the temporary packet to the output file. */
     if (*data_present) {
-#if 0
-        if ((error = av_write_frame(output_format_context, &output_packet)) < 0) {
-            fprintf(stderr, "Could not write frame (error '%s')\n",
-                    get_error_text(error));
-            av_free_packet(&output_packet);
-            return error;
-        }
-#else
         av_packet_rescale_ts(&output_packet, mAudioStream->codec->time_base, mAudioStream->time_base);
         output_packet.stream_index = mAudioStream->index;
         error = av_interleaved_write_frame(mContext, &output_packet);
 
         if (error < 0) {
           printf("av_interleaved_write_frame failed!!\n");
-//          return error;
+          return error;
         }
-#endif
         av_free_packet(&output_packet);
     }
 
@@ -824,8 +811,6 @@ private:
     bool mHasVideo;
     bool mHasAudio;
     std::vector<AudioData*> audios;
-    AudioData* audioData;
-    int index;
     int output_frame_size;
     int finished;
 
@@ -844,31 +829,9 @@ Muxer::Muxer(const char* fmt, const std::string& uri)
     , mMuxing (false)
     , mHasVideo (false)
     , mHasAudio (false)
-    , index (0)
     , output_frame_size (0)
     , finished (0)
 {
-#ifdef FAKE_AAC
-  char file[32];
-  for (int i = 0; i < AAC_INDEX; i++) {
-    sprintf(file, "dump_files/dump_aac_%d", i);
-    ifstream in;
-    in.open(file, ios_base::binary);
-    in.seekg(0,ios::end);
-    long size = in.tellg();
-    printf("%s, frame %d, size is %d\n", file, i, (int)size);
-    ifstream fin;
-    fin.open(file, ios_base::binary);
-    //    char *tmp = new char[size];
-    audioData = new AudioData((int)size);
-    fin.read(audioData->getAudioData(), size);
-    fin.close();
-    audios.push_back(audioData);
-    in.close();
-  }
-#endif
-
-
     mContext = avformat_alloc_context();
     if (!mContext) {
         av_log(NULL, AV_LOG_ERROR, "allocate output format context failed\n");
@@ -888,21 +851,6 @@ Muxer::~Muxer()
 {
     if (mMuxing)
         stop();
-}
-
-static int packet_alloc(AVBufferRef **buf, int size)
-{
-    int ret;
-      if ((unsigned)size >= (unsigned)size + FF_INPUT_BUFFER_PADDING_SIZE)
-            return AVERROR(EINVAL);
-
-        ret = av_buffer_realloc(buf, size + FF_INPUT_BUFFER_PADDING_SIZE);
-          if (ret < 0)
-                return ret;
-
-            memset((*buf)->data + size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
-
-              return 0;
 }
 
 void Muxer::stop()
@@ -1014,24 +962,21 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
     }
 
     /* select other audio parameters supported by the encoder */
-#ifndef AAC_ENC
+#ifdef AUDIO_PCMU
     c->channels       = 1;
 #else
     c->channels       = 2;
 #endif
     c->channel_layout = av_get_default_channel_layout(c->channels);
-#ifdef AAC_ENC
-    c->sample_rate    = 44100;
-#else
+#ifdef AUDIO_PCMU
     c->sample_rate    = 8000;
+#else
+    c->sample_rate    = 44100;
 #endif
 
     /** Set the sample rate for the container. */
-    mAudioStream->time_base.den = 44100; //input_codec_context->sample_rate;
-    mAudioStream->time_base.num = 1;
+    mAudioStream->time_base = (AVRational){ 1, c->sample_rate };
 
-//    mAudioStream->time_base = (AVRational){ 1, c->sample_rate };
-    /*c->time_base             = mAudioStream->time_base;*/
     if (mContext->oformat->flags & AVFMT_GLOBALHEADER)
         c->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
@@ -1039,7 +984,7 @@ bool Muxer::addAudioStream(enum AVCodecID codecId)
         av_log(NULL, AV_LOG_ERROR, "open audio codec failed\n");
         return false;
     }
-#ifndef AAC_ENC
+#ifdef AUDIO_PCMU
     if (c->codec->capabilities & CODEC_CAP_VARIABLE_FRAME_SIZE)
         c->frame_size = 10000;
 #endif
@@ -1068,52 +1013,9 @@ int Muxer::writeVideoFrame(AVFrame* frame, int pts)
 
 int Muxer::writeAudioFrame(AVFrame* frame, int pts, uint8_t* buffer)
 {
-    AVPacket pkt = { 0 };
-
-#if 0
-    int got_output = 0;
-    float t = 0, tincr = 2 * M_PI * 440.0 / mAudioStream->codec->sample_rate;
-
-    for (int j = 0; j < mAudioStream->codec->frame_size; j++) {
-        buffer[2*j] = (int)(sin(t) * 10000);
-
-        for (int k = 1; k < mAudioStream->codec->channels; k++)
-            buffer[2*j + k] = buffer[2*j];
-        t += tincr;
-    }
-#endif
     frame->pts = pts;
-#if 0
-    /* encode the samples */
-    if (avcodec_encode_audio2(mAudioStream->codec, &pkt, frame, &got_output) < 0) {
-        av_log(NULL, AV_LOG_ERROR, "error encoding a audio frame\n");
-        av_free_packet(&pkt);
-        return 1;
-    }
-#endif
 
-#ifdef FAKE_AAC_ENC
-    int got_output = 1;
-
-    if (index == AAC_INDEX - 1) {
-      index = 0;
-    }
-
-  audioData = audios[index];
-
-  {
-    int size = audioData->getAudioSize();
-    av_init_packet(&pkt);
-    printf("packet size = %d\n", size);
-    pkt.data     = (unsigned char*)audioData->getAudioData();//buf->data;
-    pkt.size     = size;
-  }
-  index++;
-
-  audios.pop_back();
-#endif
-
-#ifdef AAC_ENC
+#ifndef AUDIO_PCMU
   // re-encode to aac
   /**
    * If we have enough samples for the encoder, we encode them.
@@ -1144,17 +1046,10 @@ int Muxer::writeAudioFrame(AVFrame* frame, int pts, uint8_t* buffer)
             } while (data_written);
         }
 
-  // copy buf to AVPacket for streaming
 
 #endif
   return 0;
-#if 0
-    if (got_output) {
-        av_packet_rescale_ts(&pkt, mAudioStream->codec->time_base, mAudioStream->time_base);
-        pkt.stream_index = mAudioStream->index;
-        return av_interleaved_write_frame(mContext, &pkt);
-    }
-#endif
+
   cleanup:
     if (fifo)
         av_audio_fifo_free(fifo);
@@ -1276,7 +1171,6 @@ int main(int argc, char **argv)
 //    printf("%s, frame %d, size is %d\n", file, i, (int)size);
     ifstream fin;
     fin.open(file, ios_base::binary);
-    //    char *tmp = new char[size];
     audioPCMUData = new AudioData((int)size);
     fin.read(audioPCMUData->getAudioData(), size);
     fin.close();
@@ -1310,8 +1204,8 @@ int main(int argc, char **argv)
     {
     av_log_set_level(AV_LOG_DEBUG);
 
-    Muxer* m = new Muxer("rtsp", "rtsp://10.239.10.45:8888/live.sdp");
-    //Muxer* m = new Muxer("rtsp", "rtsp://10.239.10.117:1935/live/live.sdp");
+    Muxer* m = new Muxer("rtsp", "rtsp://localhost:8888/live.sdp");
+    //Muxer* m = new Muxer("rtsp", "rtsp://localhost:1935/live/live.sdp");
     //Muxer* m = new Muxer(NULL, "abc.mkv");
     if (!m->start())
         return 1;
@@ -1332,6 +1226,7 @@ cleanup:
     if (output_codec_context)
         avcodec_close(output_codec_context);
     if (output_format_context) {
+        write_output_file_trailer(output_format_context);
         avio_closep(&output_format_context->pb);
         avformat_free_context(output_format_context);
     }
