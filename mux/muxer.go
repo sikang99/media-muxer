@@ -5,10 +5,14 @@ package mux
   #cgo pkg-config: libavformat libavcodec libavutil
   #include <libavformat/avformat.h>
   #include <libavcodec/avcodec.h>
+  #include <libavutil/audio_fifo.h>
   #include <libavutil/avstring.h>
   #include <libavutil/channel_layout.h>
   #include <libavutil/imgutils.h>
   #include <libavutil/mathematics.h>
+  inline static int min(int a, int b) {
+    return ((a) > (b) ? (b) : (a));
+  }
   static int check_sample_fmt(AVCodec *codec, enum AVSampleFormat sample_fmt)
   {
       const enum AVSampleFormat *p = codec->sample_fmts;
@@ -91,6 +95,7 @@ type Muxer struct {
 	context     *C.AVFormatContext
 	audioStream Stream
 	videoStream Stream
+	fifo        *C.AVAudioFifo
 	// input
 	capture *Capture
 	// display
@@ -209,11 +214,20 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 	}
 	c.channels = 1
 	c.channel_layout = C.uint64_t(C.av_get_default_channel_layout(c.channels))
-	c.sample_rate = 8000
+	c.sample_rate = 44100
 	m.audioStream.stream.time_base = C.AVRational{1, c.sample_rate}
 	c.time_base = m.audioStream.stream.time_base
 	if m.context.oformat.flags&C.AVFMT_GLOBALHEADER != 0 {
 		c.flags |= C.CODEC_FLAG_GLOBAL_HEADER
+	}
+	if codecId == C.AV_CODEC_ID_AAC {
+		m.fifo = C.av_audio_fifo_alloc(c.sample_fmt, c.channels, 1)
+		if m.fifo == (*C.AVAudioFifo)(null) {
+			return false
+		}
+		m.recl = append(m.recl, func() {
+			C.av_audio_fifo_free(m.fifo)
+		})
 	}
 	if C.avcodec_open2(c, (*C.AVCodec)(null), (**C.AVDictionary)(null)) < 0 {
 		return false
@@ -252,22 +266,42 @@ func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 }
 
 func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
-	pkt := C.AVPacket{}
-	C.av_init_packet(&pkt)
-	C.fill_audio_frame(frame, m.audioStream.stream.codec)
-	frame.pts = C.int64_t(m.audioStream.ts)
-	m.audioStream.ts += int(m.audioStream.stream.codec.frame_size)
+	for C.av_audio_fifo_size(m.fifo) < 1024 { // generate & store in fifo
+		C.fill_audio_frame(frame, m.audioStream.stream.codec)
+		frame_size := frame.nb_samples
+		if C.av_audio_fifo_realloc(m.fifo, C.av_audio_fifo_size(m.fifo)+frame_size) < 0 {
+			return false
+		}
+		if C.av_audio_fifo_write(m.fifo, (*unsafe.Pointer)(unsafe.Pointer(&frame.data[0])), frame_size) < frame_size {
+			return false
+		}
+	}
 	got_packet := C.int(0)
-	if C.avcodec_encode_audio2(m.audioStream.stream.codec, &pkt, frame, &got_packet) < 0 {
-		C.av_free_packet(&pkt)
-		return false
+	for C.av_audio_fifo_size(m.fifo) >= 1024 { // read & encode & write
+		frame_size := C.min(C.av_audio_fifo_size(m.fifo), m.audioStream.stream.codec.frame_size)
+		output_frame := C.alloc_audio_frame(m.audioStream.stream.codec)
+		if C.av_audio_fifo_read(m.fifo, (*unsafe.Pointer)(unsafe.Pointer(&output_frame.data[0])), frame_size) < frame_size {
+			C.av_frame_free(&output_frame)
+			return false
+		}
+		pkt := C.AVPacket{}
+		C.av_init_packet(&pkt)
+		output_frame.pts = C.int64_t(m.audioStream.ts)
+		m.audioStream.ts += int(m.audioStream.stream.codec.frame_size)
+		if C.avcodec_encode_audio2(m.audioStream.stream.codec, &pkt, frame, &got_packet) < 0 {
+			C.av_free_packet(&pkt)
+			return false
+		}
+		if got_packet == 0 {
+			continue
+		}
+		C.av_packet_rescale_ts(&pkt, m.audioStream.stream.codec.time_base, m.audioStream.stream.time_base)
+		pkt.stream_index = m.audioStream.stream.index
+		if C.av_interleaved_write_frame(m.context, &pkt) < 0 {
+			return false
+		}
 	}
-	if got_packet == 0 {
-		return false
-	}
-	C.av_packet_rescale_ts(&pkt, m.audioStream.stream.codec.time_base, m.audioStream.stream.time_base)
-	pkt.stream_index = m.audioStream.stream.index
-	return C.av_interleaved_write_frame(m.context, &pkt) == 0
+	return true
 }
 
 func (m *Muxer) Open() bool {
@@ -275,7 +309,7 @@ func (m *Muxer) Open() bool {
 	if !m.AddVideoStream(C.AV_CODEC_ID_H264, w, h) {
 		return false
 	}
-	if !m.AddAudioStream(C.AV_CODEC_ID_PCM_MULAW) {
+	if !m.AddAudioStream(C.AV_CODEC_ID_AAC) {
 		return false
 	}
 	if m.context.oformat.flags&C.AVFMT_NOFILE == 0 {
