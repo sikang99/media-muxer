@@ -1,7 +1,7 @@
 package main
 
 import (
-	"./mux"
+	"./media"
 
 	"flag"
 	"fmt"
@@ -29,8 +29,8 @@ func main() {
 	if uri.Scheme == "rtsp" {
 		format = "rtsp"
 	}
-	media := mux.MediaSource{mux.NewVideoSource(driver, device), &(mux.AudioSource{})}
-	m, err := mux.NewMuxer(&media, format, flag.Arg(0))
+	src := media.MediaSource{media.NewVideoSource(driver, device), &(media.AudioSource{})}
+	m, err := media.NewMuxer(&src, format, flag.Arg(0))
 	if err == nil {
 		if display {
 			m.EnableDisplay()

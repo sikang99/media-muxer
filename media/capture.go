@@ -1,4 +1,4 @@
-package mux
+package media
 
 /*
 #cgo pkg-config: libavdevice libavformat libavcodec libavutil libswscale

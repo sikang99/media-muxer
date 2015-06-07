@@ -1,4 +1,4 @@
-package mux
+package media
 
 /*
 #cgo LDFLAGS: -lSDL
