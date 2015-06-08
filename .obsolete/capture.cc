@@ -21,7 +21,8 @@ public:
   bool decodeAudio(AVPacket*, AVFrame**);
   bool writeVideo(AVFrame*, int&);
   bool writeAudio(AVFrame*, int&);
-  void routine();
+  const int videoIndex() const { return mVideoId; }
+  const int audioIndex() const { return mAudioId; }
 private:
   AVFormatContext*    mInputContext;
   AVFormatContext*    mOutputContext;
@@ -168,36 +169,6 @@ bool Capture::writeVideo(AVFrame* frame, int& pts)
   return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
 }
 
-void Capture::routine()
-{
-  if (!mInputContext || !mOutputContext)
-    return;
-  av_log(nullptr, AV_LOG_INFO, "start routine.\n");
-  int pts = 0;
-  while (true) {
-    AVPacket pkt = { 0 };
-    av_init_packet(&pkt);
-    AVFrame* frame = nullptr;
-    if (read(&pkt)) {
-      if (pkt.stream_index == mVideoId) {
-        if (decodeVideo(&pkt, &frame)) {
-          writeVideo(frame, pts);
-          usleep(30000);
-          continue;
-        }
-      } else if (pkt.stream_index == mAudioId) {
-        if (decodeAudio(&pkt, &frame)) {
-          writeAudio(frame, pts);
-          usleep(10000);
-          continue;
-        }
-      } else
-        av_log(nullptr, AV_LOG_WARNING, "unrecognised packet index: %d\n", pkt.stream_index);
-    }
-    av_free_packet(&pkt);
-  }
-}
-
 bool Capture::addOutput(const std::string& uri)
 {
   mOutputContext = avformat_alloc_context();
@@ -211,13 +182,13 @@ bool Capture::addOutput(const std::string& uri)
   mOutputContext->oformat = av_guess_format(fmt, uri.c_str(), nullptr);
   if (!mOutputContext->oformat) {
     av_log(nullptr, AV_LOG_ERROR, "output format not supported\n");
-    return false;
+    goto fail;
   }
   av_strlcpy(mOutputContext->filename, uri.c_str(), sizeof(mOutputContext->filename));
   if (!(mOutputContext->oformat->flags & AVFMT_NOFILE)) {
     if (avio_open(&mOutputContext->pb, mOutputContext->filename, AVIO_FLAG_WRITE) < 0) {
       av_log(nullptr, AV_LOG_ERROR, "open output file failed\n");
-      return false;
+      goto fail;
     }
   }
   for (size_t i = 0; i < mInputContext->nb_streams; ++i) {
@@ -226,16 +197,16 @@ bool Capture::addOutput(const std::string& uri)
     AVCodec* codec = avcodec_find_decoder(mInputContext->streams[i]->codec->codec_id);
     if (!codec) {
       av_log(nullptr, AV_LOG_ERROR, "cannot find decode codec\n");
-      return false;
+      goto fail;
     }
     AVCodecContext* decoder = avcodec_alloc_context3(codec);
     if (avcodec_copy_context(decoder, mInputContext->streams[i]->codec) != 0) {
       av_log(nullptr, AV_LOG_ERROR, "cannot copy codec context\n");
-      return false;
+      goto fail;
     }
     if (avcodec_open2(decoder, codec, nullptr) < 0) {
       av_log(nullptr, AV_LOG_ERROR, "cannot open decode codec\n");
-      return false;
+      goto fail;
     }
     AVStream* stream = nullptr;
     AVCodecContext* c = nullptr;
@@ -249,17 +220,16 @@ bool Capture::addOutput(const std::string& uri)
       codec = avcodec_find_encoder(AV_CODEC_ID_H264); // encoder
       if (!codec) {
         av_log(nullptr, AV_LOG_ERROR, "cannot find video encode codec\n");
-        return false;
+        goto fail;
       }
       stream = avformat_new_stream(mOutputContext, codec);
       if (!stream) {
         av_log(nullptr, AV_LOG_ERROR, "cannot create new video stream\n");
-        return false;
+        goto fail;
       }
       c = stream->codec;
       c->codec_id = AV_CODEC_ID_H264;
       c->codec_type = AVMEDIA_TYPE_VIDEO;
-      c->bit_rate = 400000; //TODO: calculate
       c->width    = decoder->width;
       c->height   = decoder->height;
       stream->time_base = (AVRational){ 1, 30 };
@@ -270,7 +240,7 @@ bool Capture::addOutput(const std::string& uri)
         c->flags |= CODEC_FLAG_GLOBAL_HEADER;
       if (avcodec_open2(c, nullptr, nullptr) < 0) {
         av_log(nullptr, AV_LOG_ERROR, "cannot open video encode codec\n");
-        return false;
+        goto fail;
       }
       break;
     case AVMEDIA_TYPE_AUDIO:
@@ -279,18 +249,17 @@ bool Capture::addOutput(const std::string& uri)
       codec = avcodec_find_encoder(AV_CODEC_ID_AAC); // encoder
       if (!codec) {
         av_log(nullptr, AV_LOG_ERROR, "cannot find audio encode codec\n");
-        return false;
+        goto fail;
       }
       stream = avformat_new_stream(mOutputContext, codec);
       if (!stream) {
         av_log(nullptr, AV_LOG_ERROR, "cannot create new audio stream\n");
-        return false;
+        goto fail;
       }
       c = stream->codec;
-      c->bit_rate = 48000;
       c->sample_fmt = AV_SAMPLE_FMT_S16;
       c->channels       = decoder->channels;
-      c->channel_layout = decoder->channel_layout;
+      c->channel_layout = av_get_default_channel_layout(decoder->channels);
       c->sample_rate    = decoder->sample_rate;
       stream->time_base = (AVRational){ 1, c->sample_rate };
       if (mOutputContext->oformat->flags & AVFMT_GLOBALHEADER)
@@ -299,7 +268,7 @@ bool Capture::addOutput(const std::string& uri)
         c->frame_size = 10000;
       if (avcodec_open2(c, nullptr, nullptr) < 0) {
         av_log(nullptr, AV_LOG_ERROR, "cannot open audio encode codec\n");
-        return false;
+        goto fail;
       }
       break;
     default:
@@ -307,9 +276,16 @@ bool Capture::addOutput(const std::string& uri)
       continue;
     }
   }
-  avformat_write_header(mOutputContext, nullptr);
+  if (avformat_write_header(mOutputContext, nullptr) < 0)
+    goto fail;
   av_dump_format(mOutputContext, 0, mOutputContext->filename, 1);
   return true;
+fail:
+  if (!(mOutputContext->oformat->flags & AVFMT_NOFILE))
+    avio_close(mOutputContext->pb);
+  avformat_free_context(mOutputContext);
+  mOutputContext = nullptr;
+  return false;
 }
 
 Capture::~Capture()
@@ -330,7 +306,7 @@ Capture::~Capture()
     avcodec_close(mAudioDecoder);
 }
 
-
+#ifdef MAIN_PROGRAM
 int main(int argc, char const *argv[])
 {
   if (argc < 2)
@@ -351,6 +327,33 @@ int main(int argc, char const *argv[])
   std::string uri = argv[1];
   if (!capture->addOutput(uri))
     av_log(nullptr, AV_LOG_ERROR, "cannot set output\n");
-  capture->routine();
+  else {
+    av_log(nullptr, AV_LOG_INFO, "start capturing & muxing...\n");
+    av_log_set_level(AV_LOG_ERROR);
+    int pts = 0;
+    while (true) {
+      AVPacket pkt = { 0 };
+      av_init_packet(&pkt);
+      AVFrame* frame = nullptr;
+      if (capture->read(&pkt)) {
+        if (pkt.stream_index == capture->videoIndex()) {
+          if (capture->decodeVideo(&pkt, &frame)) {
+            capture->writeVideo(frame, pts);
+            usleep(30000);
+            continue;
+          }
+        } else if (pkt.stream_index == capture->audioIndex()) {
+          if (capture->decodeAudio(&pkt, &frame)) {
+            capture->writeAudio(frame, pts);
+            usleep(10000);
+            continue;
+          }
+        } else
+          av_log(nullptr, AV_LOG_WARNING, "unrecognised packet index: %d\n", pkt.stream_index);
+      }
+      av_free_packet(&pkt);
+    }
+  }
   return 0;
 }
+#endif // MAIN_PROGRAM

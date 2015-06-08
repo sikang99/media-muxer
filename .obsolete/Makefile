@@ -1,24 +1,27 @@
 # the compiler: gcc for C program, define as g++ for C++
-CC = c++
-CFLAGS  = -g -Wall -O2
-TARGET = muxer
+CC = clang++
+CFLAGS  = -g -Wall -O2 -std=c++11
+TARGET = capture
 INCLUDES =
 LDFLAGS =
-LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswscale -lboost_system -lSDL
+LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswscale
 
 ifeq ($(shell uname),Darwin)
-	LIBS += -lboost_thread-mt -lSDLmain -framework cocoa
+	AUDIO_FLAG =
 else
-	LIBS += -lboost_thread
+	AUDIO_FLAG = -DCAP_ALSA
 endif
 
-all: $(TARGET)
+all: video audio
 
 $(TARGET): $(TARGET).cc
-	$(CC) $(INCLUDES) $(CFLAGS) -o $(TARGET) $(TARGET).cc $(LDFLAGS) $(LIBS)
+	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM -o $(TARGET) $(TARGET).cc $(LDFLAGS) $(LIBS)
 
 clean:
-	$(RM) $(TARGET)
+	$(RM) $(TARGET) $(TARGET)_audio $(TARGET)_video
 
-test: $(TARGET)
-	LD_LIBRARY_PATH=../../build/lib ./$(TARGET)
+video: $(TARGET).cc
+	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM -o $(TARGET)_$@ $(TARGET).cc $(LDFLAGS) $(LIBS)
+
+audio: $(TARGET).cc
+	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM $(AUDIO_FLAG) -o $(TARGET)_$@ $(TARGET).cc $(LDFLAGS) $(LIBS)
