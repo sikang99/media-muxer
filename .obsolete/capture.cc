@@ -7,9 +7,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavdevice/avdevice.h>
 #include <libavutil/avstring.h>
-// #include <libavutil/channel_layout.h>
 #include <libavutil/imgutils.h>
-// #include <libavutil/mathematics.h>
 #include <libswscale/swscale.h>
 }
 
@@ -17,11 +15,12 @@ class Capture {
 public:
   Capture(const std::string&, const std::string&);
   virtual ~Capture();
-  bool setOutput(const std::string& uri);
+  bool addOutput(const std::string& uri);
   bool read(AVPacket*);
   bool decodeVideo(AVPacket*, AVFrame**);
   bool decodeAudio(AVPacket*, AVFrame**);
   bool writeVideo(AVFrame*, int&);
+  bool writeAudio(AVFrame*, int&);
   void routine();
 private:
   AVFormatContext*    mInputContext;
@@ -124,6 +123,29 @@ bool Capture::decodeVideo(AVPacket* pkt, AVFrame** frame)
   return false;
 }
 
+bool Capture::writeAudio(AVFrame* frame, int& pts)
+{
+  AVPacket pkt = { 0 };
+  av_init_packet(&pkt);
+  frame->pts = pts;
+  int finished = 0;
+  int frame_size = frame->nb_samples;
+  int ret = avcodec_encode_audio2(mOutputContext->streams[mAudioId]->codec, &pkt, frame, &finished);
+  av_frame_free(&frame);
+  if (ret < 0) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot encode a audio frame\n");
+    av_free_packet(&pkt);
+    return false;
+  }
+  if (!finished)
+    return false;
+  av_packet_rescale_ts(&pkt, mOutputContext->streams[mAudioId]->codec->time_base, mOutputContext->streams[mAudioId]->time_base);
+  pkt.dts = pkt.pts;
+  pkt.stream_index = mAudioId;
+  pts += frame_size;
+  return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
+}
+
 bool Capture::writeVideo(AVFrame* frame, int& pts)
 {
   AVPacket pkt = { 0 };
@@ -160,20 +182,23 @@ void Capture::routine()
       if (pkt.stream_index == mVideoId) {
         if (decodeVideo(&pkt, &frame)) {
           writeVideo(frame, pts);
-          goto next;
+          usleep(30000);
+          continue;
         }
-      } else if (pkt.stream_index == mAudioId)
-        av_log(nullptr, AV_LOG_INFO, "audio encoding not implemented\n");
-      else
+      } else if (pkt.stream_index == mAudioId) {
+        if (decodeAudio(&pkt, &frame)) {
+          writeAudio(frame, pts);
+          usleep(10000);
+          continue;
+        }
+      } else
         av_log(nullptr, AV_LOG_WARNING, "unrecognised packet index: %d\n", pkt.stream_index);
     }
     av_free_packet(&pkt);
-next:
-    usleep(30000);
   }
 }
 
-bool Capture::setOutput(const std::string& uri)
+bool Capture::addOutput(const std::string& uri)
 {
   mOutputContext = avformat_alloc_context();
   if (!mOutputContext) {
@@ -317,10 +342,14 @@ int main(int argc, char const *argv[])
 #ifdef __APPLE__
   std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", "0:0"));
 #else
+  #ifdef CAP_ALSA
+  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("alsa", "hw:1"));
+  #else
   std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("v4l2", "/dev/video0"));
+  #endif
 #endif
   std::string uri = argv[1];
-  if (!capture->setOutput(uri))
+  if (!capture->addOutput(uri))
     av_log(nullptr, AV_LOG_ERROR, "cannot set output\n");
   capture->routine();
   return 0;
