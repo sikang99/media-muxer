@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <memory>
 #include <string>
 
 extern "C" {
@@ -16,9 +17,11 @@ class Capture {
 public:
   Capture(const std::string&, const std::string&);
   virtual ~Capture();
-  bool setOutput(const std::string& fmt, const std::string& uri);
+  bool setOutput(const std::string& uri);
   bool read(AVPacket*);
-  bool decode2YUV(AVPacket*, AVFrame**);
+  bool decodeVideo(AVPacket*, AVFrame**);
+  bool decodeAudio(AVPacket*, AVFrame**);
+  bool writeVideo(AVFrame*, int&);
   void routine();
 private:
   AVFormatContext*    mInputContext;
@@ -47,10 +50,11 @@ Capture::Capture(const std::string& driver, const std::string& device)
     av_log(nullptr, AV_LOG_ERROR, "cannot find input driver %s\n", driver.c_str());
     return;
   }
+#ifdef __APPLE__
   AVDictionary* options = nullptr;
   av_dict_set(&options, "list_devices", "true", 0);
   avformat_open_input(&mInputContext, nullptr, ifmt, &options);
-
+#endif
   if (avformat_open_input(&mInputContext, device.c_str(), ifmt, nullptr) < 0) {
     av_log(nullptr, AV_LOG_ERROR, "cannot open %s\n", device.c_str());
     return;
@@ -74,7 +78,25 @@ bool Capture::read(AVPacket* pkt)
   return true;
 }
 
-bool Capture::decode2YUV(AVPacket* pkt, AVFrame** frame)
+bool Capture::decodeAudio(AVPacket* pkt, AVFrame** frame)
+{
+  if (!frame)
+    return false;
+  AVFrame* framePCM = av_frame_alloc();
+  int finished = 0;
+  int ret = avcodec_decode_audio4(mAudioDecoder, framePCM, &finished, pkt);
+  av_free_packet(pkt);
+  if (ret < 0) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot decode audio frame\n");
+    return false;
+  }
+  if (!finished)
+    return false;
+  *frame = framePCM;
+  return true;
+}
+
+bool Capture::decodeVideo(AVPacket* pkt, AVFrame** frame)
 {
   if (!frame)
     return false;
@@ -83,45 +105,85 @@ bool Capture::decode2YUV(AVPacket* pkt, AVFrame** frame)
   int ret = avcodec_decode_video2(mVideoDecoder, frameRGB, &finished, pkt);
   av_free_packet(pkt);
   if (ret < 0) {
-    av_log(nullptr, AV_LOG_ERROR, "cannot decode frame\n");
+    av_log(nullptr, AV_LOG_ERROR, "cannot decode video frame\n");
     av_frame_free(&frameRGB);
     return false;
   }
   if (finished) {
     *frame = av_frame_alloc();
-    (*frame)->format = mVideoDecoder->pix_fmt;
+    (*frame)->format = AV_PIX_FMT_YUV420P;
     (*frame)->width = mVideoDecoder->width;
     (*frame)->height = mVideoDecoder->height;
-    av_image_alloc((*frame)->data, (*frame)->linesize, mVideoDecoder->width, mVideoDecoder->height, mVideoDecoder->pix_fmt, 32);
-    sws_scale(mSwsCtx, const_cast<const uint8_t**>(frameRGB->data), frameRGB->linesize, 0, mVideoDecoder->height, (*frame)->data, (*frame)->linesize);
+    av_image_alloc((*frame)->data, (*frame)->linesize, mVideoDecoder->width, mVideoDecoder->height, AV_PIX_FMT_YUV420P, 32);
+    sws_scale(mSwsCtx,
+      const_cast<const uint8_t**>(frameRGB->data), frameRGB->linesize,
+      0, mVideoDecoder->height,
+      (*frame)->data, (*frame)->linesize);
     return true;
   }
   return false;
+}
+
+bool Capture::writeVideo(AVFrame* frame, int& pts)
+{
+  AVPacket pkt = { 0 };
+  av_init_packet(&pkt);
+  frame->pts = pts;
+  int finished = 0;
+  int ret = avcodec_encode_video2(mOutputContext->streams[mVideoId]->codec, &pkt, frame, &finished);
+  av_frame_free(&frame);
+  if (ret < 0) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot encode a video frame\n");
+    av_free_packet(&pkt);
+    return false;
+  }
+  if (!finished)
+    return false;
+  av_packet_rescale_ts(&pkt, mOutputContext->streams[mVideoId]->codec->time_base, mOutputContext->streams[mVideoId]->time_base);
+  pkt.dts = pkt.pts;
+  pkt.stream_index = mVideoId;
+  pts++;
+  return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
 }
 
 void Capture::routine()
 {
   if (!mInputContext || !mOutputContext)
     return;
+  av_log(nullptr, AV_LOG_INFO, "start routine.\n");
+  int pts = 0;
   while (true) {
-
-
-
-
-
-    // av_interleaved_write_frame(mOutputContext, &pkt);
-    // usleep(30000);
+    AVPacket pkt = { 0 };
+    av_init_packet(&pkt);
+    AVFrame* frame = nullptr;
+    if (read(&pkt)) {
+      if (pkt.stream_index == mVideoId) {
+        if (decodeVideo(&pkt, &frame)) {
+          writeVideo(frame, pts);
+          goto next;
+        }
+      } else if (pkt.stream_index == mAudioId)
+        av_log(nullptr, AV_LOG_INFO, "audio encoding not implemented\n");
+      else
+        av_log(nullptr, AV_LOG_WARNING, "unrecognised packet index: %d\n", pkt.stream_index);
+    }
+    av_free_packet(&pkt);
+next:
+    usleep(30000);
   }
 }
 
-bool Capture::setOutput(const std::string& fmt, const std::string& uri)
+bool Capture::setOutput(const std::string& uri)
 {
   mOutputContext = avformat_alloc_context();
   if (!mOutputContext) {
     av_log(nullptr, AV_LOG_ERROR, "cannot allocate output context\n");
     return false;
   }
-  mOutputContext->oformat = av_guess_format(fmt.c_str(), uri.c_str(), nullptr);
+  const char* fmt = nullptr;
+  if (uri.compare(0, 7, "rtsp://") == 0)
+    fmt = "rtsp";
+  mOutputContext->oformat = av_guess_format(fmt, uri.c_str(), nullptr);
   if (!mOutputContext->oformat) {
     av_log(nullptr, AV_LOG_ERROR, "output format not supported\n");
     return false;
@@ -246,13 +308,20 @@ Capture::~Capture()
 
 int main(int argc, char const *argv[])
 {
+  if (argc < 2)
+    return 1;
   av_register_all();
   avformat_network_init();
   avdevice_register_all();
 
-  std::auto_ptr<Capture> capture = std::auto_ptr<Capture>(new Capture("avfoundation", "0:0"));
-  if (!capture->setOutput("", "a.mkv"))
+#ifdef __APPLE__
+  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", "0:0"));
+#else
+  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("v4l2", "/dev/video0"));
+#endif
+  std::string uri = argv[1];
+  if (!capture->setOutput(uri))
     av_log(nullptr, AV_LOG_ERROR, "cannot set output\n");
-  // capture->routine();
+  capture->routine();
   return 0;
 }
