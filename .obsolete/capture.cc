@@ -276,7 +276,7 @@ bool Capture::addOutput(const std::string& uri)
     case AVMEDIA_TYPE_AUDIO:
       mAudioDecoder = decoder;
       mAudioId = i;
-      codec = avcodec_find_encoder(AV_CODEC_ID_PCM_MULAW); // encoder
+      codec = avcodec_find_encoder(AV_CODEC_ID_AAC); // encoder
       if (!codec) {
         av_log(nullptr, AV_LOG_ERROR, "cannot find audio encode codec\n");
         return false;
