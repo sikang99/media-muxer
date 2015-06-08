@@ -4,13 +4,7 @@ CFLAGS  = -g -Wall -O2 -std=c++11
 TARGET = capture
 INCLUDES =
 LDFLAGS =
-LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswscale
-
-ifeq ($(shell uname),Darwin)
-	AUDIO_FLAG =
-else
-	AUDIO_FLAG = -DCAP_ALSA
-endif
+LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswresample -lswscale
 
 all: video audio
 
@@ -24,4 +18,4 @@ video: $(TARGET).cc
 	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM -o $(TARGET)_$@ $(TARGET).cc $(LDFLAGS) $(LIBS)
 
 audio: $(TARGET).cc
-	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM $(AUDIO_FLAG) -o $(TARGET)_$@ $(TARGET).cc $(LDFLAGS) $(LIBS)
+	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM -DCAP_AUDIO -o $(TARGET)_$@ $(TARGET).cc $(LDFLAGS) $(LIBS)

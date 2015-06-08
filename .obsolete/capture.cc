@@ -8,6 +8,7 @@ extern "C" {
 #include <libavdevice/avdevice.h>
 #include <libavutil/avstring.h>
 #include <libavutil/imgutils.h>
+#include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
 
@@ -27,6 +28,7 @@ private:
   AVFormatContext*    mInputContext;
   AVFormatContext*    mOutputContext;
   struct SwsContext*  mSwsCtx;
+  SwrContext*         mResCtx;
   AVCodecContext*     mVideoDecoder;
   AVCodecContext*     mAudioDecoder;
   int                 mVideoId, mAudioId;
@@ -36,6 +38,7 @@ Capture::Capture(const std::string& driver, const std::string& device)
   : mInputContext (nullptr)
   , mOutputContext (nullptr)
   , mSwsCtx (nullptr)
+  , mResCtx (nullptr)
   , mVideoDecoder (nullptr)
   , mAudioDecoder (nullptr)
   , mVideoId (-1), mAudioId(-1)
@@ -92,7 +95,34 @@ bool Capture::decodeAudio(AVPacket* pkt, AVFrame** frame)
   }
   if (!finished)
     return false;
-  *frame = framePCM;
+  if (mResCtx) {
+    AVFrame* frameResampled = av_frame_alloc();
+    if (!frameResampled) {
+        av_log(nullptr, AV_LOG_ERROR, "cannot allocate audio frame\n");
+        return false;
+    }
+    AVCodecContext* c = mOutputContext->streams[mAudioId]->codec;
+    frameResampled->nb_samples     = framePCM->nb_samples;
+    frameResampled->format         = c->sample_fmt;
+    frameResampled->channel_layout = framePCM->channel_layout;
+    int buffer_size = av_samples_get_buffer_size(nullptr, framePCM->channels, framePCM->nb_samples, c->sample_fmt, 0);
+    uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size)); //FIXME: release this buffer properly.
+    if (!samples) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
+      return false;
+    }
+    if (avcodec_fill_audio_frame(frameResampled, c->channels, c->sample_fmt, samples, buffer_size, 0) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot setup converted audio frame\n");
+      av_freep(samples);
+      return false;
+    }
+    if (swr_convert(mResCtx, &samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
+      return false;
+    }
+    *frame = frameResampled;
+  } else
+    *frame = framePCM;
   return true;
 }
 
@@ -141,7 +171,7 @@ bool Capture::writeAudio(AVFrame* frame, int& pts)
   if (!finished)
     return false;
   av_packet_rescale_ts(&pkt, mOutputContext->streams[mAudioId]->codec->time_base, mOutputContext->streams[mAudioId]->time_base);
-  pkt.dts = pkt.pts;
+  // pkt.dts = pkt.pts;
   pkt.stream_index = mAudioId;
   pts += frame_size;
   return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
@@ -163,7 +193,7 @@ bool Capture::writeVideo(AVFrame* frame, int& pts)
   if (!finished)
     return false;
   av_packet_rescale_ts(&pkt, mOutputContext->streams[mVideoId]->codec->time_base, mOutputContext->streams[mVideoId]->time_base);
-  pkt.dts = pkt.pts;
+  // pkt.dts = pkt.pts;
   pkt.stream_index = mVideoId;
   pts++;
   return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
@@ -256,6 +286,7 @@ bool Capture::addOutput(const std::string& uri)
         av_log(nullptr, AV_LOG_ERROR, "cannot create new audio stream\n");
         goto fail;
       }
+      av_log(nullptr, AV_LOG_INFO, "audio sample_fmt: %s\n", av_get_sample_fmt_name(mAudioDecoder->sample_fmt));
       c = stream->codec;
       c->sample_fmt = AV_SAMPLE_FMT_S16;
       c->channels       = decoder->channels;
@@ -269,6 +300,26 @@ bool Capture::addOutput(const std::string& uri)
       if (avcodec_open2(c, nullptr, nullptr) < 0) {
         av_log(nullptr, AV_LOG_ERROR, "cannot open audio encode codec\n");
         goto fail;
+      }
+      if (mAudioDecoder->sample_fmt != AV_SAMPLE_FMT_S16 && !mResCtx) {
+        mResCtx = swr_alloc_set_opts(nullptr,
+                                      av_get_default_channel_layout(c->channels),
+                                      c->sample_fmt,
+                                      c->sample_rate,
+                                      av_get_default_channel_layout(mAudioDecoder->channels),
+                                      mAudioDecoder->sample_fmt,
+                                      mAudioDecoder->sample_rate,
+                                      0, nullptr);
+        if (!mResCtx) {
+          av_log(nullptr, AV_LOG_ERROR, "cannot allocate resample context\n");
+          goto fail;
+        }
+        if (swr_init(mResCtx) < 0) {
+          av_log(nullptr, AV_LOG_ERROR, "cannot open resample context\n");
+          swr_free(&mResCtx);
+          mResCtx = nullptr;
+          goto fail;
+        }
       }
       break;
     default:
@@ -300,6 +351,8 @@ Capture::~Capture()
   }
   if (mSwsCtx)
     sws_freeContext(mSwsCtx);
+  if (mResCtx)
+    swr_free(&mResCtx);
   if (mVideoDecoder)
     avcodec_close(mVideoDecoder);
   if (mAudioDecoder)
@@ -316,9 +369,13 @@ int main(int argc, char const *argv[])
   avdevice_register_all();
 
 #ifdef __APPLE__
-  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", "0:0"));
+  #ifdef CAP_AUDIO
+  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", ":0"));
+  #else
+  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", "0"));
+  #endif
 #else
-  #ifdef CAP_ALSA
+  #ifdef CAP_AUDIO
   std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("alsa", "hw:1"));
   #else
   std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("v4l2", "/dev/video0"));
@@ -345,7 +402,7 @@ int main(int argc, char const *argv[])
         } else if (pkt.stream_index == capture->audioIndex()) {
           if (capture->decodeAudio(&pkt, &frame)) {
             capture->writeAudio(frame, pts);
-            usleep(10000);
+            usleep(1000);
             continue;
           }
         } else
