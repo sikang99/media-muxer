@@ -286,7 +286,6 @@ bool Capture::addOutput(const std::string& uri)
         av_log(nullptr, AV_LOG_ERROR, "cannot create new audio stream\n");
         goto fail;
       }
-      av_log(nullptr, AV_LOG_INFO, "audio sample_fmt: %s\n", av_get_sample_fmt_name(mAudioDecoder->sample_fmt));
       c = stream->codec;
       c->sample_fmt = AV_SAMPLE_FMT_S16;
       c->channels       = decoder->channels;
@@ -301,7 +300,7 @@ bool Capture::addOutput(const std::string& uri)
         av_log(nullptr, AV_LOG_ERROR, "cannot open audio encode codec\n");
         goto fail;
       }
-      if (mAudioDecoder->sample_fmt != AV_SAMPLE_FMT_S16 && !mResCtx) {
+      if (/*mAudioDecoder->sample_fmt != AV_SAMPLE_FMT_S16 && */!mResCtx) {
         mResCtx = swr_alloc_set_opts(nullptr,
                                       av_get_default_channel_layout(c->channels),
                                       c->sample_fmt,
@@ -402,7 +401,7 @@ int main(int argc, char const *argv[])
         } else if (pkt.stream_index == capture->audioIndex()) {
           if (capture->decodeAudio(&pkt, &frame)) {
             capture->writeAudio(frame, pts);
-            usleep(1000);
+            usleep(10000);
             continue;
           }
         } else
