@@ -8,6 +8,7 @@ Capture::Capture(const std::string& driver, const std::string& device)
   , mOutputContext (nullptr)
   , mSwsCtx (nullptr)
   , mResCtx (nullptr)
+  , mAudioFifo (nullptr)
   , mVideoDecoder (nullptr)
   , mAudioDecoder (nullptr)
   , mVideoSrcId (-1), mAudioSrcId(-1)
@@ -51,10 +52,8 @@ bool Capture::read(AVPacket* pkt)
   return true;
 }
 
-bool Capture::decodeAudio(AVPacket* pkt, AVFrame** frame)
+bool Capture::decodeAudio(AVPacket* pkt)
 {
-  if (!frame)
-    return false;
   AVFrame* framePCM = av_frame_alloc();
   int finished = 0;
   int ret = avcodec_decode_audio4(mAudioDecoder, framePCM, &finished, pkt);
@@ -65,34 +64,26 @@ bool Capture::decodeAudio(AVPacket* pkt, AVFrame** frame)
   }
   if (!finished)
     return false;
-  if (mResCtx) {
-    AVFrame* frameResampled = av_frame_alloc();
-    if (!frameResampled) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot allocate audio frame\n");
-        return false;
-    }
-    AVCodecContext* c = mOutputContext->streams[mAudioSrcId]->codec;
-    frameResampled->nb_samples     = framePCM->nb_samples;
-    frameResampled->format         = c->sample_fmt;
-    frameResampled->channel_layout = framePCM->channel_layout;
-    int buffer_size = av_samples_get_buffer_size(nullptr, framePCM->channels, framePCM->nb_samples, c->sample_fmt, 0);
-    uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size)); //FIXME: release this buffer properly.
-    if (!samples) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
-      return false;
-    }
-    if (avcodec_fill_audio_frame(frameResampled, c->channels, c->sample_fmt, samples, buffer_size, 0) < 0) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot setup converted audio frame\n");
-      av_freep(samples);
-      return false;
-    }
-    if (swr_convert(mResCtx, &samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
-      return false;
-    }
-    *frame = frameResampled;
-  } else
-    *frame = framePCM;
+
+  int buffer_size = av_samples_get_buffer_size(nullptr, framePCM->channels, framePCM->nb_samples, mOutputContext->streams[mAudioSrcId]->codec->sample_fmt, 0);
+  uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size)); //FIXME: release this buffer properly.
+  if (!samples) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
+    return false;
+  }
+  if (swr_convert(mResCtx, &samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
+    return false;
+  }
+  if (av_audio_fifo_realloc(mAudioFifo, av_audio_fifo_size(mAudioFifo) + framePCM->nb_samples) < 0) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot reallocate fifo\n");
+    return false;
+  }
+  if (av_audio_fifo_write(mAudioFifo, (void**)(&samples), framePCM->nb_samples) < framePCM->nb_samples) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot not write data to fifo\n");
+    return false;
+  }
+  av_freep(&samples);
   return true;
 }
 
@@ -124,27 +115,56 @@ bool Capture::decodeVideo(AVPacket* pkt, AVFrame** frame)
   return false;
 }
 
-bool Capture::writeAudio(AVFrame* frame, int& pts)
+bool Capture::writeAudio(int& pts)
 {
-  AVPacket pkt = { 0 };
-  av_init_packet(&pkt);
-  frame->pts = pts;
-  int finished = 0;
-  int frame_size = frame->nb_samples;
-  int ret = avcodec_encode_audio2(mOutputContext->streams[mAudioSrcId]->codec, &pkt, frame, &finished);
-  av_frame_free(&frame);
-  if (ret < 0) {
-    av_log(nullptr, AV_LOG_ERROR, "cannot encode a audio frame\n");
-    av_free_packet(&pkt);
-    return false;
+  while (av_audio_fifo_size(mAudioFifo) < mOutputContext->streams[mAudioSrcId]->codec->frame_size) {
+    AVPacket src = { 0 };
+    av_init_packet(&src);
+    if (!read(&src))
+      return false;
+    if (!decodeAudio(&src))
+      return false;
+    av_free_packet(&src);
   }
-  if (!finished)
-    return false;
-  av_packet_rescale_ts(&pkt, mOutputContext->streams[mAudioSrcId]->codec->time_base, mOutputContext->streams[mAudioSrcId]->time_base);
-  // pkt.dts = pkt.pts;
-  pkt.stream_index = mAudioSrcId;
-  pts += frame_size;
-  return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
+  AVFrame* frame;
+  while (av_audio_fifo_size(mAudioFifo) >= mOutputContext->streams[mAudioSrcId]->codec->frame_size) {
+    frame = av_frame_alloc();
+    frame->nb_samples = mOutputContext->streams[mAudioSrcId]->codec->frame_size;
+    frame->channel_layout = mOutputContext->streams[mAudioSrcId]->codec->channel_layout;
+    frame->format = mOutputContext->streams[mAudioSrcId]->codec->sample_fmt;
+    frame->sample_rate = mOutputContext->streams[mAudioSrcId]->codec->sample_rate;
+    int frame_size = frame->nb_samples;
+    if (av_frame_get_buffer(frame, 0) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot allocate output frame samples\n");
+      av_frame_free(&frame);
+      return false;
+    }
+    if (av_audio_fifo_read(mAudioFifo, (void**)frame->data, frame_size) < frame_size) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot read enough data from fifo\n");
+      av_frame_free(&frame);
+      return false;
+    }
+    AVPacket pkt = { 0 };
+    av_init_packet(&pkt);
+    frame->pts = pts;
+    int finished = 0;
+    int ret = avcodec_encode_audio2(mOutputContext->streams[mAudioSrcId]->codec, &pkt, frame, &finished);
+    av_frame_free(&frame);
+    if (ret < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot encode a audio frame\n");
+      av_free_packet(&pkt);
+      return false;
+    }
+    if (!finished)
+      return false;
+    av_packet_rescale_ts(&pkt, mOutputContext->streams[mAudioSrcId]->codec->time_base, mOutputContext->streams[mAudioSrcId]->time_base);
+    // pkt.dts = pkt.pts;
+    pkt.stream_index = mAudioSrcId;
+    pts += frame_size;
+    if (av_interleaved_write_frame(mOutputContext, &pkt) != 0)
+      return false;
+  }
+  return true;
 }
 
 bool Capture::writeVideo(AVFrame* frame, int& pts)
@@ -303,6 +323,12 @@ bool Capture::addOutput(const std::string& uri)
         mResCtx = nullptr;
         goto fail;
       }
+      if (!mAudioFifo) {
+        if (!(mAudioFifo = av_audio_fifo_alloc(AV_SAMPLE_FMT_S16, c->channels, 1))) {
+          av_log(nullptr, AV_LOG_ERROR, "cannot allocate audio fifo\n");
+          goto fail;
+        }
+      }
     }
   }
   if (avformat_write_header(mOutputContext, nullptr) < 0)
@@ -367,6 +393,11 @@ int main(int argc, char const *argv[])
     av_log_set_level(AV_LOG_ERROR);
     int pts = 0;
     while (true) {
+#ifdef CAP_AUDIO
+      capture->writeAudio(pts);
+      usleep(5000);
+      continue;
+#else
       AVPacket pkt = { 0 };
       av_init_packet(&pkt);
       AVFrame* frame = nullptr;
@@ -377,16 +408,11 @@ int main(int argc, char const *argv[])
             usleep(30000);
             continue;
           }
-        } else if (pkt.stream_index == capture->audioIndex()) {
-          if (capture->decodeAudio(&pkt, &frame)) {
-            capture->writeAudio(frame, pts);
-            usleep(10000);
-            continue;
-          }
         } else
           av_log(nullptr, AV_LOG_WARNING, "unrecognised packet index: %d\n", pkt.stream_index);
       }
       av_free_packet(&pkt);
+#endif
     }
   }
   return 0;
