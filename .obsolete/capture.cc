@@ -22,16 +22,17 @@ public:
   bool decodeAudio(AVPacket*, AVFrame**);
   bool writeVideo(AVFrame*, int&);
   bool writeAudio(AVFrame*, int&);
-  const int videoIndex() const { return mVideoId; }
-  const int audioIndex() const { return mAudioId; }
+  const int videoIndex() const { return mVideoSrcId; }
+  const int audioIndex() const { return mAudioSrcId; }
 private:
+  void init();
   AVFormatContext*    mInputContext;
   AVFormatContext*    mOutputContext;
   struct SwsContext*  mSwsCtx;
   SwrContext*         mResCtx;
   AVCodecContext*     mVideoDecoder;
   AVCodecContext*     mAudioDecoder;
-  int                 mVideoId, mAudioId;
+  int                 mVideoSrcId, mAudioSrcId;
 };
 
 Capture::Capture(const std::string& driver, const std::string& device)
@@ -41,7 +42,7 @@ Capture::Capture(const std::string& driver, const std::string& device)
   , mResCtx (nullptr)
   , mVideoDecoder (nullptr)
   , mAudioDecoder (nullptr)
-  , mVideoId (-1), mAudioId(-1)
+  , mVideoSrcId (-1), mAudioSrcId(-1)
 {
   mInputContext = avformat_alloc_context();
   if (!mInputContext) {
@@ -68,6 +69,7 @@ Capture::Capture(const std::string& driver, const std::string& device)
   }
   av_log(nullptr, AV_LOG_INFO, "[-] %d streams in context\n", mInputContext->nb_streams);
   av_dump_format(mInputContext, 0, device.c_str(), 0);
+  init();
 }
 
 bool Capture::read(AVPacket* pkt)
@@ -101,7 +103,7 @@ bool Capture::decodeAudio(AVPacket* pkt, AVFrame** frame)
         av_log(nullptr, AV_LOG_ERROR, "cannot allocate audio frame\n");
         return false;
     }
-    AVCodecContext* c = mOutputContext->streams[mAudioId]->codec;
+    AVCodecContext* c = mOutputContext->streams[mAudioSrcId]->codec;
     frameResampled->nb_samples     = framePCM->nb_samples;
     frameResampled->format         = c->sample_fmt;
     frameResampled->channel_layout = framePCM->channel_layout;
@@ -161,7 +163,7 @@ bool Capture::writeAudio(AVFrame* frame, int& pts)
   frame->pts = pts;
   int finished = 0;
   int frame_size = frame->nb_samples;
-  int ret = avcodec_encode_audio2(mOutputContext->streams[mAudioId]->codec, &pkt, frame, &finished);
+  int ret = avcodec_encode_audio2(mOutputContext->streams[mAudioSrcId]->codec, &pkt, frame, &finished);
   av_frame_free(&frame);
   if (ret < 0) {
     av_log(nullptr, AV_LOG_ERROR, "cannot encode a audio frame\n");
@@ -170,9 +172,9 @@ bool Capture::writeAudio(AVFrame* frame, int& pts)
   }
   if (!finished)
     return false;
-  av_packet_rescale_ts(&pkt, mOutputContext->streams[mAudioId]->codec->time_base, mOutputContext->streams[mAudioId]->time_base);
+  av_packet_rescale_ts(&pkt, mOutputContext->streams[mAudioSrcId]->codec->time_base, mOutputContext->streams[mAudioSrcId]->time_base);
   // pkt.dts = pkt.pts;
-  pkt.stream_index = mAudioId;
+  pkt.stream_index = mAudioSrcId;
   pts += frame_size;
   return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
 }
@@ -183,7 +185,7 @@ bool Capture::writeVideo(AVFrame* frame, int& pts)
   av_init_packet(&pkt);
   frame->pts = pts;
   int finished = 0;
-  int ret = avcodec_encode_video2(mOutputContext->streams[mVideoId]->codec, &pkt, frame, &finished);
+  int ret = avcodec_encode_video2(mOutputContext->streams[mVideoSrcId]->codec, &pkt, frame, &finished);
   av_frame_free(&frame);
   if (ret < 0) {
     av_log(nullptr, AV_LOG_ERROR, "cannot encode a video frame\n");
@@ -192,11 +194,49 @@ bool Capture::writeVideo(AVFrame* frame, int& pts)
   }
   if (!finished)
     return false;
-  av_packet_rescale_ts(&pkt, mOutputContext->streams[mVideoId]->codec->time_base, mOutputContext->streams[mVideoId]->time_base);
+  av_packet_rescale_ts(&pkt, mOutputContext->streams[mVideoSrcId]->codec->time_base, mOutputContext->streams[mVideoSrcId]->time_base);
   // pkt.dts = pkt.pts;
-  pkt.stream_index = mVideoId;
+  pkt.stream_index = mVideoSrcId;
   pts++;
   return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
+}
+
+void Capture::init()
+{
+  for (size_t i = 0; i < mInputContext->nb_streams; ++i) {
+    if (mAudioDecoder && mVideoDecoder)
+      break;
+    AVCodec* codec = avcodec_find_decoder(mInputContext->streams[i]->codec->codec_id);
+    if (!codec) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot find decode codec\n");
+      return;
+    }
+    AVCodecContext* decoder = avcodec_alloc_context3(codec);
+    if (avcodec_copy_context(decoder, mInputContext->streams[i]->codec) != 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot copy codec context\n");
+      return;
+    }
+    if (avcodec_open2(decoder, codec, nullptr) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot open decode codec\n");
+      return;
+    }
+    switch (decoder->codec_type) {
+    case AVMEDIA_TYPE_VIDEO:
+      mVideoDecoder = decoder;
+      mVideoSrcId = i;
+      mSwsCtx = sws_getContext(decoder->width, decoder->height, decoder->pix_fmt,
+                                decoder->width, decoder->height, AV_PIX_FMT_YUV420P,
+                                SWS_BILINEAR, nullptr, nullptr, nullptr);
+      break;
+    case AVMEDIA_TYPE_AUDIO:
+      mAudioDecoder = decoder;
+      mAudioSrcId = i;
+      break;
+    default:
+      av_log(nullptr, AV_LOG_WARNING, "unsupported media type: %d\n", decoder->codec_type);
+      continue;
+    }
+  }
 }
 
 bool Capture::addOutput(const std::string& uri)
@@ -207,6 +247,9 @@ bool Capture::addOutput(const std::string& uri)
     return false;
   }
   const char* fmt = nullptr;
+  AVStream* stream = nullptr;
+  AVCodecContext* c = nullptr;
+  AVCodec* codec = nullptr;
   if (uri.compare(0, 7, "rtsp://") == 0)
     fmt = "rtsp";
   mOutputContext->oformat = av_guess_format(fmt, uri.c_str(), nullptr);
@@ -221,109 +264,77 @@ bool Capture::addOutput(const std::string& uri)
       goto fail;
     }
   }
-  for (size_t i = 0; i < mInputContext->nb_streams; ++i) {
-    if (mAudioDecoder && mVideoDecoder)
-      break;
-    AVCodec* codec = avcodec_find_decoder(mInputContext->streams[i]->codec->codec_id);
+  if (mVideoDecoder) { // add video stream
+    codec = avcodec_find_encoder(AV_CODEC_ID_H264);
     if (!codec) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot find decode codec\n");
+      av_log(nullptr, AV_LOG_ERROR, "cannot find video encode codec\n");
       goto fail;
     }
-    AVCodecContext* decoder = avcodec_alloc_context3(codec);
-    if (avcodec_copy_context(decoder, mInputContext->streams[i]->codec) != 0) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot copy codec context\n");
+    stream = avformat_new_stream(mOutputContext, codec);
+    if (!stream) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot create new video stream\n");
       goto fail;
     }
-    if (avcodec_open2(decoder, codec, nullptr) < 0) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot open decode codec\n");
+    c = stream->codec;
+    c->codec_id = AV_CODEC_ID_H264;
+    c->codec_type = AVMEDIA_TYPE_VIDEO;
+    c->width    = mVideoDecoder->width;
+    c->height   = mVideoDecoder->height;
+    stream->time_base = (AVRational){ 1, 30 };
+    c->time_base      = stream->time_base;
+    c->gop_size      = 12; /* emit one intra frame every twelve frames at most */
+    c->pix_fmt       = AV_PIX_FMT_YUV420P;
+    if (mOutputContext->oformat->flags & AVFMT_GLOBALHEADER)
+      c->flags |= CODEC_FLAG_GLOBAL_HEADER;
+    if (avcodec_open2(c, nullptr, nullptr) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot open video encode codec\n");
       goto fail;
     }
-    AVStream* stream = nullptr;
-    AVCodecContext* c = nullptr;
-    switch (decoder->codec_type) {
-    case AVMEDIA_TYPE_VIDEO:
-      mVideoDecoder = decoder;
-      mVideoId = i;
-      mSwsCtx = sws_getContext(decoder->width, decoder->height, decoder->pix_fmt,
-                                decoder->width, decoder->height, AV_PIX_FMT_YUV420P,
-                                SWS_BILINEAR, nullptr, nullptr, nullptr);
-      codec = avcodec_find_encoder(AV_CODEC_ID_H264); // encoder
-      if (!codec) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot find video encode codec\n");
+  }
+  if (mAudioDecoder) { // add audio stream
+    codec = avcodec_find_encoder(AV_CODEC_ID_AAC);
+    if (!codec) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot find audio encode codec\n");
+      goto fail;
+    }
+    stream = avformat_new_stream(mOutputContext, codec);
+    if (!stream) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot create new audio stream\n");
+      goto fail;
+    }
+    c = stream->codec;
+    c->sample_fmt = AV_SAMPLE_FMT_S16;
+    c->channels       = mAudioDecoder->channels;
+    c->channel_layout = av_get_default_channel_layout(mAudioDecoder->channels);
+    c->sample_rate    = mAudioDecoder->sample_rate;
+    stream->time_base = (AVRational){ 1, c->sample_rate };
+    if (mOutputContext->oformat->flags & AVFMT_GLOBALHEADER)
+      c->flags |= CODEC_FLAG_GLOBAL_HEADER;
+    if (c->codec->capabilities & CODEC_CAP_VARIABLE_FRAME_SIZE)
+      c->frame_size = 10000;
+    if (avcodec_open2(c, nullptr, nullptr) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot open audio encode codec\n");
+      goto fail;
+    }
+    if (/*mAudioDecoder->sample_fmt != AV_SAMPLE_FMT_S16 && */!mResCtx) {
+      mResCtx = swr_alloc_set_opts(nullptr,
+                                    av_get_default_channel_layout(c->channels),
+                                    c->sample_fmt,
+                                    c->sample_rate,
+                                    av_get_default_channel_layout(mAudioDecoder->channels),
+                                    mAudioDecoder->sample_fmt,
+                                    mAudioDecoder->sample_rate,
+                                    0, nullptr);
+      if (!mResCtx) {
+        av_log(nullptr, AV_LOG_ERROR, "cannot allocate resample context\n");
         goto fail;
       }
-      stream = avformat_new_stream(mOutputContext, codec);
-      if (!stream) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot create new video stream\n");
+      if (swr_init(mResCtx) < 0) {
+        av_log(nullptr, AV_LOG_ERROR, "cannot open resample context\n");
+        swr_free(&mResCtx);
+        mResCtx = nullptr;
         goto fail;
       }
-      c = stream->codec;
-      c->codec_id = AV_CODEC_ID_H264;
-      c->codec_type = AVMEDIA_TYPE_VIDEO;
-      c->width    = decoder->width;
-      c->height   = decoder->height;
-      stream->time_base = (AVRational){ 1, 30 };
-      c->time_base      = stream->time_base;
-      c->gop_size      = 12; /* emit one intra frame every twelve frames at most */
-      c->pix_fmt       = AV_PIX_FMT_YUV420P;
-      if (mOutputContext->oformat->flags & AVFMT_GLOBALHEADER)
-        c->flags |= CODEC_FLAG_GLOBAL_HEADER;
-      if (avcodec_open2(c, nullptr, nullptr) < 0) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot open video encode codec\n");
-        goto fail;
-      }
-      break;
-    case AVMEDIA_TYPE_AUDIO:
-      mAudioDecoder = decoder;
-      mAudioId = i;
-      codec = avcodec_find_encoder(AV_CODEC_ID_AAC); // encoder
-      if (!codec) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot find audio encode codec\n");
-        goto fail;
-      }
-      stream = avformat_new_stream(mOutputContext, codec);
-      if (!stream) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot create new audio stream\n");
-        goto fail;
-      }
-      c = stream->codec;
-      c->sample_fmt = AV_SAMPLE_FMT_S16;
-      c->channels       = decoder->channels;
-      c->channel_layout = av_get_default_channel_layout(decoder->channels);
-      c->sample_rate    = decoder->sample_rate;
-      stream->time_base = (AVRational){ 1, c->sample_rate };
-      if (mOutputContext->oformat->flags & AVFMT_GLOBALHEADER)
-        c->flags |= CODEC_FLAG_GLOBAL_HEADER;
-      if (c->codec->capabilities & CODEC_CAP_VARIABLE_FRAME_SIZE)
-        c->frame_size = 10000;
-      if (avcodec_open2(c, nullptr, nullptr) < 0) {
-        av_log(nullptr, AV_LOG_ERROR, "cannot open audio encode codec\n");
-        goto fail;
-      }
-      if (/*mAudioDecoder->sample_fmt != AV_SAMPLE_FMT_S16 && */!mResCtx) {
-        mResCtx = swr_alloc_set_opts(nullptr,
-                                      av_get_default_channel_layout(c->channels),
-                                      c->sample_fmt,
-                                      c->sample_rate,
-                                      av_get_default_channel_layout(mAudioDecoder->channels),
-                                      mAudioDecoder->sample_fmt,
-                                      mAudioDecoder->sample_rate,
-                                      0, nullptr);
-        if (!mResCtx) {
-          av_log(nullptr, AV_LOG_ERROR, "cannot allocate resample context\n");
-          goto fail;
-        }
-        if (swr_init(mResCtx) < 0) {
-          av_log(nullptr, AV_LOG_ERROR, "cannot open resample context\n");
-          swr_free(&mResCtx);
-          mResCtx = nullptr;
-          goto fail;
-        }
-      }
-      break;
-    default:
-      av_log(nullptr, AV_LOG_WARNING, "unsupported media type: %d\n", decoder->codec_type);
-      continue;
     }
   }
   if (avformat_write_header(mOutputContext, nullptr) < 0)
