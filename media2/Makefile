@@ -13,6 +13,7 @@ $(TARGET): $(TARGET).cc
 
 clean:
 	$(RM) $(TARGET) $(TARGET)_audio $(TARGET)_video
+	$(RM) -r $(TARGET)_audio.dSYM $(TARGET)_video.dSYM
 
 video: $(TARGET).cc
 	$(CC) $(INCLUDES) $(CFLAGS) -DMAIN_PROGRAM -o $(TARGET)_$@ $(TARGET).cc $(LDFLAGS) $(LIBS)
