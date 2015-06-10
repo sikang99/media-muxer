@@ -1,3 +1,4 @@
+#include <memory>
 #include <string>
 
 extern "C" {
@@ -13,8 +14,8 @@ extern "C" {
 
 class Capture {
 public:
-  Capture(const std::string&, const std::string&);
   virtual ~Capture();
+  static std::unique_ptr<Capture> create(const std::string&, const std::string&);
   bool addOutput(const std::string& uri);
   bool read(AVPacket*);
   bool writeVideo(int&);
@@ -22,7 +23,8 @@ public:
   const int videoIndex() const { return mVideoSrcId; }
   const int audioIndex() const { return mAudioSrcId; }
 private:
-  void init();
+  Capture(const std::string&, const std::string&);
+  bool init();
   bool decodeAudio(AVPacket*);
   bool decodeVideo(AVPacket*, AVFrame**);
   AVFormatContext*    mInputContext;

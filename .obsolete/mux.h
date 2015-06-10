@@ -6,6 +6,6 @@ public:
   Muxer();
   virtual ~Muxer();
 private:
-  std::auto_ptr<Capture> mVideo;
-  std::auto_ptr<Capture> mAudio;
+  std::unique_ptr<Capture> mVideo;
+  std::unique_ptr<Capture> mAudio;
 };

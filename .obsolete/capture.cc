@@ -1,7 +1,6 @@
 #include "capture.h"
 
 #include <unistd.h>
-#include <memory>
 
 Capture::Capture(const std::string& driver, const std::string& device)
   : mInputContext (nullptr)
@@ -38,7 +37,6 @@ Capture::Capture(const std::string& driver, const std::string& device)
   }
   av_log(nullptr, AV_LOG_INFO, "[-] %d streams in context\n", mInputContext->nb_streams);
   av_dump_format(mInputContext, 0, device.c_str(), 0);
-  init();
 }
 
 bool Capture::read(AVPacket* pkt)
@@ -202,24 +200,26 @@ bool Capture::writeVideo(int& pts)
   return av_interleaved_write_frame(mOutputContext, &pkt) == 0;
 }
 
-void Capture::init()
+bool Capture::init()
 {
+  if (!mInputContext)
+    return false;
   for (size_t i = 0; i < mInputContext->nb_streams; ++i) {
     if (mAudioDecoder && mVideoDecoder)
       break;
     AVCodec* codec = avcodec_find_decoder(mInputContext->streams[i]->codec->codec_id);
     if (!codec) {
       av_log(nullptr, AV_LOG_ERROR, "cannot find decode codec\n");
-      return;
+      return false;
     }
     AVCodecContext* decoder = avcodec_alloc_context3(codec);
     if (avcodec_copy_context(decoder, mInputContext->streams[i]->codec) != 0) {
       av_log(nullptr, AV_LOG_ERROR, "cannot copy codec context\n");
-      return;
+      return false;
     }
     if (avcodec_open2(decoder, codec, nullptr) < 0) {
       av_log(nullptr, AV_LOG_ERROR, "cannot open decode codec\n");
-      return;
+      return false;
     }
     switch (decoder->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
@@ -238,6 +238,7 @@ void Capture::init()
       continue;
     }
   }
+  return true;
 }
 
 bool Capture::addOutput(const std::string& uri)
@@ -358,6 +359,8 @@ fail:
 
 Capture::~Capture()
 {
+  if (mAudioFifo)
+    av_audio_fifo_free(mAudioFifo);
   if (mInputContext)
     avformat_close_input(&mInputContext);
   if (mOutputContext) {
@@ -376,6 +379,13 @@ Capture::~Capture()
     avcodec_close(mAudioDecoder);
 }
 
+std::unique_ptr<Capture> Capture::create(const std::string& driver, const std::string& device) {
+  auto capture = std::unique_ptr<Capture>(new Capture(driver, device));
+  if (!capture->init())
+    capture.reset();
+  return capture;
+}
+
 #ifdef MAIN_PROGRAM
 int main(int argc, char const *argv[])
 {
@@ -387,17 +397,21 @@ int main(int argc, char const *argv[])
 
 #ifdef __APPLE__
   #ifdef CAP_AUDIO
-  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", ":0"));
+  auto capture = Capture::create("avfoundation", ":0");
   #else
-  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("avfoundation", "0"));
+  auto capture = Capture::create("avfoundation", "0");
   #endif
 #else
   #ifdef CAP_AUDIO
-  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("alsa", "hw:1"));
+  auto capture = Capture::create("alsa", "hw:1");
   #else
-  std::shared_ptr<Capture> capture = std::shared_ptr<Capture>(new Capture("v4l2", "/dev/video0"));
+  auto capture = Capture::create("v4l2", "/dev/video0");
   #endif
 #endif
+  if (!capture) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot open capture\n");
+    return -1;
+  }
   std::string uri = argv[1];
   if (!capture->addOutput(uri))
     av_log(nullptr, AV_LOG_ERROR, "cannot set output\n");
