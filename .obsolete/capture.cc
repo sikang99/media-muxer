@@ -1,5 +1,5 @@
 #include "capture.h"
-
+#include <chrono>
 #include <unistd.h>
 
 Capture::Capture(const std::string& driver, const std::string& device)
@@ -35,7 +35,7 @@ Capture::Capture(const std::string& driver, const std::string& device)
     av_log(nullptr, AV_LOG_ERROR, "cannot find stream information\n");
     return;
   }
-  av_log(nullptr, AV_LOG_INFO, "[-] %d streams in context\n", mInputContext->nb_streams);
+  av_log(nullptr, AV_LOG_INFO, "[-] %d stream(s) in context\n", mInputContext->nb_streams);
   av_dump_format(mInputContext, 0, device.c_str(), 0);
 }
 
@@ -64,21 +64,24 @@ bool Capture::decodeAudio(AVPacket* pkt)
     return false;
 
   int buffer_size = av_samples_get_buffer_size(nullptr, framePCM->channels, framePCM->nb_samples, mOutputContext->streams[mAudioSrcId]->codec->sample_fmt, 0);
-  uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size)); //FIXME: release this buffer properly.
+  uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size));
   if (!samples) {
     av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
     return false;
   }
   if (swr_convert(mResCtx, &samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
     av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
+    av_freep(&samples);
     return false;
   }
   if (av_audio_fifo_realloc(mAudioFifo, av_audio_fifo_size(mAudioFifo) + framePCM->nb_samples) < 0) {
     av_log(nullptr, AV_LOG_ERROR, "cannot reallocate fifo\n");
+    av_freep(&samples);
     return false;
   }
   if (av_audio_fifo_write(mAudioFifo, (void**)(&samples), framePCM->nb_samples) < framePCM->nb_samples) {
     av_log(nullptr, AV_LOG_ERROR, "cannot not write data to fifo\n");
+    av_freep(&samples);
     return false;
   }
   av_freep(&samples);
@@ -416,13 +419,17 @@ int main(int argc, char const *argv[])
   if (!capture->addOutput(uri))
     av_log(nullptr, AV_LOG_ERROR, "cannot set output\n");
   else {
-    av_log(nullptr, AV_LOG_INFO, "start capturing & muxing...\n");
+    av_log(nullptr, AV_LOG_INFO, "[-] start capturing & muxing...\n");
     av_log_set_level(AV_LOG_ERROR);
     int pts = 0;
     while (true) {
 #ifdef CAP_AUDIO
+      std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
       capture->writeAudio(pts);
-      usleep(5000);
+      std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+      int interval = 10000 - std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+      if (interval > 0)
+        usleep(interval);
       continue;
 #else
       capture->writeVideo(pts);
