@@ -1,3 +1,6 @@
+#ifndef Capture_h
+#define Capture_h
+
 #include <memory>
 #include <string>
 
@@ -36,3 +39,5 @@ private:
   AVCodecContext*     mAudioDecoder;
   int                 mVideoSrcId, mAudioSrcId;
 };
+
+#endif // Capture_h

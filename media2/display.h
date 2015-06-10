@@ -1,3 +1,6 @@
+#ifndef Display_h
+#define Display_h
+
 #include <boost/thread.hpp>
 #include <string>
 
@@ -25,3 +28,5 @@ private:
   boost::thread mThread;
   void loop();
 };
+
+#endif //Display_h
