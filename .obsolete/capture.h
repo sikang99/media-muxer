@@ -17,14 +17,14 @@ public:
   virtual ~Capture();
   bool addOutput(const std::string& uri);
   bool read(AVPacket*);
-  bool decodeVideo(AVPacket*, AVFrame**);
-  bool writeVideo(AVFrame*, int&);
+  bool writeVideo(int&);
   bool writeAudio(int&);
   const int videoIndex() const { return mVideoSrcId; }
   const int audioIndex() const { return mAudioSrcId; }
 private:
   void init();
   bool decodeAudio(AVPacket*);
+  bool decodeVideo(AVPacket*, AVFrame**);
   AVFormatContext*    mInputContext;
   AVFormatContext*    mOutputContext;
   struct SwsContext*  mSwsCtx;

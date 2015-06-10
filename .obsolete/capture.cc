@@ -167,8 +167,21 @@ bool Capture::writeAudio(int& pts)
   return true;
 }
 
-bool Capture::writeVideo(AVFrame* frame, int& pts)
+bool Capture::writeVideo(int& pts)
 {
+  AVPacket src = { 0 };
+  av_init_packet(&src);
+  AVFrame* frame = nullptr;
+  if (!read(&src)) {
+    av_free_packet(&src);
+    return false;
+  }
+  if (!decodeVideo(&src, &frame)) {
+    av_free_packet(&src);
+    return false;
+  }
+  av_free_packet(&src);
+
   AVPacket pkt = { 0 };
   av_init_packet(&pkt);
   frame->pts = pts;
@@ -398,20 +411,9 @@ int main(int argc, char const *argv[])
       usleep(5000);
       continue;
 #else
-      AVPacket pkt = { 0 };
-      av_init_packet(&pkt);
-      AVFrame* frame = nullptr;
-      if (capture->read(&pkt)) {
-        if (pkt.stream_index == capture->videoIndex()) {
-          if (capture->decodeVideo(&pkt, &frame)) {
-            capture->writeVideo(frame, pts);
-            usleep(30000);
-            continue;
-          }
-        } else
-          av_log(nullptr, AV_LOG_WARNING, "unrecognised packet index: %d\n", pkt.stream_index);
-      }
-      av_free_packet(&pkt);
+      capture->writeVideo(pts);
+      usleep(30000);
+      continue;
 #endif
     }
   }
