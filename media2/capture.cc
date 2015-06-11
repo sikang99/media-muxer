@@ -63,29 +63,39 @@ bool Capture::decodeAudio(AVPacket* pkt)
   if (!finished)
     return false;
 
-  int buffer_size = av_samples_get_buffer_size(nullptr, framePCM->channels, framePCM->nb_samples, mOutputContext->streams[mAudioSrcId]->codec->sample_fmt, 0);
-  uint8_t* samples = reinterpret_cast<uint8_t*>(av_malloc(buffer_size));
-  if (!samples) {
-    av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
-    return false;
-  }
-  if (swr_convert(mResCtx, &samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
-    av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
-    av_freep(&samples);
-    return false;
+  bool r = false;
+  uint8_t** samples = nullptr;
+  if (framePCM->format == AV_SAMPLE_FMT_S16) {
+    samples = framePCM->extended_data;
+    } else {
+    if (!(*samples = reinterpret_cast<uint8_t*>(calloc(framePCM->channels, sizeof(*samples))))) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
+      return false;
+    }
+    if (av_samples_alloc(samples, nullptr, framePCM->channels, framePCM->nb_samples, AV_SAMPLE_FMT_S16, 0) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted input samples\n");
+      goto done;
+    }
+    if (swr_convert(mResCtx, samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
+      goto done;
+    }
   }
   if (av_audio_fifo_realloc(mAudioFifo, av_audio_fifo_size(mAudioFifo) + framePCM->nb_samples) < 0) {
     av_log(nullptr, AV_LOG_ERROR, "cannot reallocate fifo\n");
-    av_freep(&samples);
-    return false;
+    goto done;
   }
-  if (av_audio_fifo_write(mAudioFifo, (void**)(&samples), framePCM->nb_samples) < framePCM->nb_samples) {
+  if (av_audio_fifo_write(mAudioFifo, reinterpret_cast<void**>(samples), framePCM->nb_samples) < framePCM->nb_samples) {
     av_log(nullptr, AV_LOG_ERROR, "cannot not write data to fifo\n");
-    av_freep(&samples);
-    return false;
+    goto done;
   }
-  av_freep(&samples);
-  return true;
+  r = true;
+done:
+  if (framePCM->format != AV_SAMPLE_FMT_S16) {
+    av_freep(&samples[0]);
+    free(samples);
+  }
+  return r;
 }
 
 bool Capture::decodeVideo(AVPacket* pkt, AVFrame** frame)
