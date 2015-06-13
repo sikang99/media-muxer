@@ -62,40 +62,41 @@ bool Capture::decodeAudio(AVPacket* pkt)
   }
   if (!finished)
     return false;
-
-  bool r = false;
-  uint8_t** samples = nullptr;
+  if (av_audio_fifo_realloc(mAudioFifo, av_audio_fifo_size(mAudioFifo) + framePCM->nb_samples) < 0) {
+    av_log(nullptr, AV_LOG_ERROR, "cannot reallocate fifo\n");
+    return false;
+  }
   if (framePCM->format == AV_SAMPLE_FMT_S16) {
-    samples = framePCM->extended_data;
-    } else {
-    if (!(*samples = reinterpret_cast<uint8_t*>(calloc(framePCM->channels, sizeof(*samples))))) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer\n");
+    if (av_audio_fifo_write(mAudioFifo, reinterpret_cast<void**>(framePCM->extended_data), framePCM->nb_samples) < framePCM->nb_samples) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot not write data to fifo\n");
+      return false;
+    }
+  } else {
+    uint8_t** samples = nullptr;
+    bool r = false;
+    if (!(samples = reinterpret_cast<uint8_t**>(calloc(framePCM->channels, sizeof(*samples))))) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted sample buffer ptrs\n");
       return false;
     }
     if (av_samples_alloc(samples, nullptr, framePCM->channels, framePCM->nb_samples, AV_SAMPLE_FMT_S16, 0) < 0) {
-      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted input samples\n");
+      av_log(nullptr, AV_LOG_ERROR, "cannot allocate converted input sample buffer\n");
       goto done;
     }
     if (swr_convert(mResCtx, samples, framePCM->nb_samples, const_cast<const uint8_t**>(framePCM->extended_data), framePCM->nb_samples) < 0) {
       av_log(nullptr, AV_LOG_ERROR, "cannot convert input samples\n");
       goto done;
     }
-  }
-  if (av_audio_fifo_realloc(mAudioFifo, av_audio_fifo_size(mAudioFifo) + framePCM->nb_samples) < 0) {
-    av_log(nullptr, AV_LOG_ERROR, "cannot reallocate fifo\n");
-    goto done;
-  }
-  if (av_audio_fifo_write(mAudioFifo, reinterpret_cast<void**>(samples), framePCM->nb_samples) < framePCM->nb_samples) {
-    av_log(nullptr, AV_LOG_ERROR, "cannot not write data to fifo\n");
-    goto done;
-  }
-  r = true;
+    if (av_audio_fifo_write(mAudioFifo, reinterpret_cast<void**>(samples), framePCM->nb_samples) < framePCM->nb_samples) {
+      av_log(nullptr, AV_LOG_ERROR, "cannot not write data to fifo\n");
+      goto done;
+    }
+    r = true;
 done:
-  if (framePCM->format != AV_SAMPLE_FMT_S16) {
     av_freep(&samples[0]);
     free(samples);
+    return r;
   }
-  return r;
+  return true;
 }
 
 bool Capture::decodeVideo(AVPacket* pkt, AVFrame** frame)
