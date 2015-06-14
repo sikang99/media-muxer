@@ -1,3 +1,6 @@
 capture_audio
 capture_video
 capture
+muxer
+muxer_audio
+muxer_video

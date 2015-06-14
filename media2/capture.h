@@ -18,26 +18,32 @@ extern "C" {
 class Capture {
 public:
   virtual ~Capture();
-  static std::unique_ptr<Capture> create(const std::string&, const std::string&);
-  bool addOutput(const std::string& uri);
-  bool read(AVPacket*);
+  static std::unique_ptr<Capture> New(const std::string&, const std::string&);
+  bool decodeAudio(AVAudioFifo*);
+  bool decodeVideo(AVFrame**);
+  const AVCodecContext* videoCodec() const { return mVideoDecoder; }
+  const AVCodecContext* audioCodec() const { return mAudioDecoder; }
+
+#ifdef CAPTURE_EXTENDED
   bool writeVideo(int&);
   bool writeAudio(int&);
-  const int videoIndex() const { return mVideoSrcId; }
-  const int audioIndex() const { return mAudioSrcId; }
+  bool addOutput(const std::string& uri);
+#endif
 private:
   Capture(const std::string&, const std::string&);
   bool init();
-  bool decodeAudio(AVPacket*);
-  bool decodeVideo(AVPacket*, AVFrame**);
+  bool read(AVPacket*);
+  static int          mCtxId;
   AVFormatContext*    mInputContext;
-  AVFormatContext*    mOutputContext;
   struct SwsContext*  mSwsCtx;
   SwrContext*         mResCtx;
-  AVAudioFifo*        mAudioFifo;
   AVCodecContext*     mVideoDecoder;
   AVCodecContext*     mAudioDecoder;
+#ifdef CAPTURE_EXTENDED
+  AVFormatContext*    mOutputContext;
+  AVAudioFifo*        mAudioFifo;
   int                 mVideoSrcId, mAudioSrcId;
+#endif
 };
 
 #endif // Capture_h
