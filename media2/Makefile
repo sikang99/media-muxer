@@ -3,20 +3,24 @@ CC = clang++
 CFLAGS  = -Wall -O2 -std=c++11
 INCLUDES =
 LDFLAGS =
-LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswresample -lswscale
+LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswresample -lswscale -lboost_system
 SRC = capture.cc muxer.cc main.cc
 
-all: video audio
+
+ifeq ($(shell uname),Darwin)
+	LIBS += -lboost_thread-mt
+else
+	LIBS += -lboost_thread
+endif
+
+all: muxer
 
 clean:
 	$(RM) muxer muxer_audio muxer_video
 	$(RM) -r *.dSYM
 
 debug: CFLAGS += -g
-debug: video audio
+debug: muxer
 
-video: $(SRC)
-	$(CC) $(INCLUDES) $(CFLAGS) -o muxer_$@ $(SRC) $(LDFLAGS) $(LIBS)
-
-audio: $(SRC)
-	$(CC) $(INCLUDES) $(CFLAGS) -DCAP_AUDIO -o muxer_$@ $(SRC) $(LDFLAGS) $(LIBS)
+muxer: $(SRC)
+	$(CC) $(INCLUDES) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LIBS)

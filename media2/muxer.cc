@@ -11,7 +11,7 @@ Muxer::Muxer()
   , mAudio (Capture::New("avfoundation", ":0"))
 #else
   , mVideo (Capture::New("v4l2", "/dev/video0"))
-  , mAudio (Capture::New("alsa", "hw:1"))
+  , mAudio (Capture::New("alsa", "hw:0"))
 #endif
 {
 }
