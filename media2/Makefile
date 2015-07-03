@@ -1,5 +1,5 @@
 # the compiler: gcc for C program, define as g++ for C++
-CC = clang++
+CC = g++
 CFLAGS  = -Wall -O2 -std=c++11
 INCLUDES =
 LDFLAGS =
