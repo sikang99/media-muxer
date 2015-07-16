@@ -1,8 +1,14 @@
 #include "muxer.h"
+#include <sys/time.h>
+
+static inline int64_t currentTimeMillis() {
+  timeval time;
+  gettimeofday(&time, nullptr);
+  return ((time.tv_sec * 1000) + (time.tv_usec / 1000));
+}
 
 Muxer::Muxer()
-  : mAudioTs (0)
-  , mVideoTs (0)
+  : mStartTime (currentTimeMillis())
   , mVideoId (-1)
   , mAudioId (-1)
   , mAudioFifo (nullptr)
@@ -11,7 +17,7 @@ Muxer::Muxer()
   , mAudio (Capture::New("avfoundation", ":0"))
 #else
   , mVideo (Capture::New("v4l2", "/dev/video0"))
-  , mAudio (Capture::New("alsa", "hw:0"))
+  , mAudio (Capture::New("alsa", "hw:2"))
 #endif
 {
 }
@@ -38,7 +44,7 @@ void Muxer::writeVideo()
   if (!mVideo->decodeVideo(&frame)) {
     return;
   }
-  frame->pts = mVideoTs;
+  frame->pts = currentTimeMillis() - mStartTime;
   std::map<std::string, AVFormatContext*>::iterator it = mOutputs.begin();
   for (; it != mOutputs.end(); ++it) {
     AVPacket pkt = { 0 };
@@ -53,12 +59,11 @@ void Muxer::writeVideo()
     }
     if (!finished)
       continue;
-    av_packet_rescale_ts(&pkt, context->streams[mVideoId]->codec->time_base, context->streams[mVideoId]->time_base);
+    pkt.pts = (int64_t)(pkt.pts / (av_q2d(context->streams[mVideoId]->time_base) * 1000));
     pkt.stream_index = mVideoId;
     av_interleaved_write_frame(context, &pkt);
   }
   av_frame_free(&frame);
-  mVideoTs++;
 }
 
 void Muxer::writeAudio()
@@ -88,7 +93,7 @@ void Muxer::writeAudio()
     }
     AVPacket pkt = { 0 };
     av_init_packet(&pkt);
-    frame->pts = mAudioTs;
+    frame->pts = currentTimeMillis() - mStartTime;
     int finished = 0;
     int ret = avcodec_encode_audio2(context->streams[mAudioId]->codec, &pkt, frame, &finished);
     av_frame_free(&frame);
@@ -99,9 +104,8 @@ void Muxer::writeAudio()
     }
     if (!finished)
       return;
-    av_packet_rescale_ts(&pkt, context->streams[mAudioId]->codec->time_base, context->streams[mAudioId]->time_base);
+    pkt.pts = (int64_t)(pkt.pts / (av_q2d(context->streams[mAudioId]->time_base) * 1000));
     pkt.stream_index = mAudioId;
-    mAudioTs += frame_size;
     if (av_interleaved_write_frame(context, &pkt) != 0)
       return;
   }
@@ -149,14 +153,13 @@ bool Muxer::addOutput(const std::string& uri, enum AVCodecID videoCodec, enum AV
       goto fail;
     }
     c = stream->codec;
-    c->codec_id = videoCodec;
+    c->codec_id   = videoCodec;
     c->codec_type = AVMEDIA_TYPE_VIDEO;
-    c->width    = mVideo->videoCodec()->width;
-    c->height   = mVideo->videoCodec()->height;
-    stream->time_base = (AVRational){ 1, 30 };
-    c->time_base      = stream->time_base;
-    c->gop_size      = 12; /* emit one intra frame every twelve frames at most */
-    c->pix_fmt       = AV_PIX_FMT_YUV420P;
+    c->width      = mVideo->videoCodec()->width;
+    c->height     = mVideo->videoCodec()->height;
+    c->gop_size   = 12; /* emit one intra frame every twelve frames at most */
+    c->pix_fmt    = AV_PIX_FMT_YUV420P;
+    c->time_base  = AVRational{1, 30};
     if (outputContext->oformat->flags & AVFMT_GLOBALHEADER)
       c->flags |= CODEC_FLAG_GLOBAL_HEADER;
     if (avcodec_open2(c, nullptr, nullptr) < 0) {
@@ -177,11 +180,11 @@ bool Muxer::addOutput(const std::string& uri, enum AVCodecID videoCodec, enum AV
       goto fail;
     }
     c = stream->codec;
-    c->sample_fmt = AV_SAMPLE_FMT_S16;
+    c->sample_fmt     = AV_SAMPLE_FMT_S16;
     c->channels       = mAudio->audioCodec()->channels;
     c->channel_layout = av_get_default_channel_layout(mAudio->audioCodec()->channels);
     c->sample_rate    = mAudio->audioCodec()->sample_rate;
-    stream->time_base = (AVRational){ 1, c->sample_rate };
+    // c->time_base      = AVRational{1, c->sample_rate};
     if (outputContext->oformat->flags & AVFMT_GLOBALHEADER)
       c->flags |= CODEC_FLAG_GLOBAL_HEADER;
     if (c->codec->capabilities & CODEC_CAP_VARIABLE_FRAME_SIZE)

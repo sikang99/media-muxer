@@ -14,7 +14,7 @@ public:
   void writeVideo();
   void writeAudio();
 private:
-  int mAudioTs, mVideoTs;
+  int64_t mStartTime;
   int mVideoId, mAudioId;
   AVAudioFifo* mAudioFifo;
   std::unique_ptr<Capture> mVideo;
