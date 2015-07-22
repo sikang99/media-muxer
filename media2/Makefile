@@ -3,8 +3,8 @@ CC = g++
 CFLAGS  = -Wall -O2 -std=c++11
 INCLUDES =
 LDFLAGS =
-LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswresample -lswscale -lboost_system
-SRC = capture.cc muxer.cc main.cc
+LIBS = -lavformat -lavcodec -lavutil -lavdevice -lswresample -lswscale -lboost_system -lSDL2
+SRC = capture.cc muxer.cc player.cc main.cc
 
 
 ifeq ($(shell uname),Darwin)
@@ -16,7 +16,7 @@ endif
 all: muxer
 
 clean:
-	$(RM) muxer muxer_audio muxer_video
+	$(RM) muxer
 	$(RM) -r *.dSYM
 
 debug: CFLAGS += -g

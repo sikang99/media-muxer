@@ -17,8 +17,9 @@ Muxer::Muxer()
   , mAudio (Capture::New("avfoundation", ":0"))
 #else
   , mVideo (Capture::New("v4l2", "/dev/video0"))
-  , mAudio (Capture::New("alsa", "hw:2"))
+  , mAudio (Capture::New("alsa", "hw:3"))
 #endif
+  , mPlayer (render::Player::New(mVideo->videoCodec()->width, mVideo->videoCodec()->height))
 {
 }
 
@@ -36,6 +37,7 @@ Muxer::~Muxer()
       avformat_free_context(context);
     }
   }
+  mPlayer.reset();
 }
 
 void Muxer::writeVideo()
@@ -43,6 +45,10 @@ void Muxer::writeVideo()
   AVFrame* frame = nullptr;
   if (!mVideo->decodeVideo(&frame)) {
     return;
+  }
+  {
+    size_t size = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, mVideo->videoCodec()->width, mVideo->videoCodec()->height, 32);
+    mPlayer->draw(frame->data[0], size, mVideo->videoCodec()->width, mVideo->videoCodec()->height);
   }
   frame->pts = currentTimeMillis() - mStartTime;
   std::map<std::string, AVFormatContext*>::iterator it = mOutputs.begin();

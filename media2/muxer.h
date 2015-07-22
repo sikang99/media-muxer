@@ -2,6 +2,7 @@
 #define Muxer_h
 
 #include "capture.h"
+#include "player.h"
 #include <map>
 
 class Muxer {
@@ -20,6 +21,7 @@ private:
   std::unique_ptr<Capture> mVideo;
   std::unique_ptr<Capture> mAudio;
   std::map<std::string, AVFormatContext*> mOutputs;
+  std::unique_ptr<render::Player> mPlayer;
 };
 
 #endif // Muxer_h
