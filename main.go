@@ -1,7 +1,6 @@
 package main
 
 import (
-	//"./media"
 	"stoney/media-muxer/media"
 
 	"flag"
