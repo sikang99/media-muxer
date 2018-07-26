@@ -1,5 +1,5 @@
 #
-# Makefile
+# Makefile by Stoney (sikang99@gmail.com)
 #
 all: usage
 
@@ -13,6 +13,9 @@ edit  e:
 	@echo ""
 	@echo "make (edit) [readme|make]"
 	@echo ""
+
+edit-go eg:
+	vi main.go
 
 edit-readme er:
 	vim README.md
@@ -28,7 +31,8 @@ build b:
 	go build
 
 run r:
-	./media-muxer
+	#./media-muxer -device /dev/video0 -display -driver video4linux2
+	./media-muxer -display
 
 # -------------------------------------------------------------------------------------
 git  g:
