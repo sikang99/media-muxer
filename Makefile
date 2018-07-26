@@ -8,21 +8,27 @@ usage:
 	@echo "usage: make [edit|build|run|test]"
 	@echo ""
 
+# -------------------------------------------------------------------------------------
+edit  e:
+	@echo ""
+	@echo "make (edit) [readme|make]"
+	@echo ""
+
 edit-readme er:
 	vim README.md
 
 edit-make em:
 	vim Makefile
 
+# -------------------------------------------------------------------------------------
 install-pkg ip:
-	sudo apt install libsdl-dev libavformat-dev libavcodec-dev libavutil-dev
+	sudo apt install libsdl-dev libavformat-dev libavcodec-dev libavutil-dev libv4l-dev
 
 build b:
 	go build
 
 run r:
-	go run
-
+	./media-muxer
 
 # -------------------------------------------------------------------------------------
 git  g:
