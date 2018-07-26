@@ -62,9 +62,13 @@ func NewCapture(driver, device string) (*Capture, error) {
 		return nil, fmt.Errorf("cannot find decode codec")
 	}
 	id.codec = C.avcodec_alloc_context3(codec)
-	if C.avcodec_copy_context(id.codec, deCtx) != 0 {
-		return nil, fmt.Errorf("cannot copy codec context")
-	}
+	/*
+		if C.avcodec_copy_context(id.codec, deCtx) != 0 {
+			return nil, fmt.Errorf("cannot copy codec context")
+		}
+	*/
+	id.codec = deCtx
+
 	if C.avcodec_open2(id.codec, codec, (**C.struct_AVDictionary)(null)) < 0 {
 		return nil, fmt.Errorf("cannot open decode codec")
 	}
@@ -100,7 +104,8 @@ func (id *Capture) Read(frame *C.AVFrame) error {
 		return fmt.Errorf("not video frame")
 	}
 	got_frame := C.int(0)
-	if C.avcodec_decode_video2(id.codec, id.frame, &got_frame, &pkt) < 0 {
+	//if C.avcodec_decode_video2(id.codec, id.frame, &got_frame, &pkt) < 0 {
+	if C.avcodec_receive_frame(id.codec, id.frame) < 0 {
 		return fmt.Errorf("decode frame error")
 	}
 	if got_frame != 0 {

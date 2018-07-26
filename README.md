@@ -36,7 +36,7 @@ Changes
 	- avcodec_decode_video2() -> av_send_frame()
 	- av_free_packet() ->  av_packet_unref()
 	- av_register_all() ->  delete (comment out)
-	- avcodec_copy_context() -> assign
+	- avcodec_copy_context() -> assign or avcodec_parameters_from_contex()
 ```
-
+- No error & warning"
 
