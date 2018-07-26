@@ -1,12 +1,13 @@
 README.md
 ====
 
+Muxer using libav C library
 
 History
 =====
 
 - 2018/07/26 fixed some code to adapt to latest libav library, ie. change functions deprecated
-- 2018/07/26 fork from https://github.com/zyxar/media-muxer
+- 2018/07/26 fork from https://github.com/zyxar/media-muxer, which is 3 years old after update.
 
 
 References
