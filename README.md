@@ -19,12 +19,13 @@ Changes
 ```
 - for main.go
 	- "./media" -> "stoney/media-muxer/media
+	- flag.NArg() -> flag.NFlag()
 
 - for media/muxer.go
 	- CODEC_CAP_VARIABLE_FRAME_SIZE -> AV_CODEC_CAP_VARIABLE_FRAME_SIZE 
 	- CODEC_FLAG_GLOBAL_HEADER -> AV_CODEC_FLAG_GLOBAL_HEADER 
 
-(compiled)
+(compiled after above modification)
 
 - for media/{muxer,capture}.go
 	- endcode -> receive, decode -> send
