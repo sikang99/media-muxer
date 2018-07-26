@@ -184,7 +184,7 @@ func (m *Muxer) AddVideoStream(codecId uint32, width, height int) bool {
 	c.gop_size = 12
 	c.pix_fmt = C.AV_PIX_FMT_YUV420P
 	if m.context.oformat.flags&C.AVFMT_GLOBALHEADER != 0 {
-		c.flags |= C.CODEC_FLAG_GLOBAL_HEADER
+		c.flags |= C.AV_CODEC_FLAG_GLOBAL_HEADER
 	}
 	if C.avcodec_open2(c, (*C.AVCodec)(null), (**C.AVDictionary)(null)) < 0 {
 		return false
@@ -218,7 +218,7 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 	m.audioStream.stream.time_base = C.AVRational{1, c.sample_rate}
 	c.time_base = m.audioStream.stream.time_base
 	if m.context.oformat.flags&C.AVFMT_GLOBALHEADER != 0 {
-		c.flags |= C.CODEC_FLAG_GLOBAL_HEADER
+		c.flags |= C.AV_CODEC_FLAG_GLOBAL_HEADER
 	}
 	if codecId == C.AV_CODEC_ID_AAC {
 		m.fifo = C.av_audio_fifo_alloc(c.sample_fmt, c.channels, 1)
@@ -235,7 +235,7 @@ func (m *Muxer) AddAudioStream(codecId uint32) bool {
 	m.recl = append(m.recl, func() {
 		C.avcodec_close(c)
 	})
-	if c.codec.capabilities&C.CODEC_CAP_VARIABLE_FRAME_SIZE != 0 {
+	if c.codec.capabilities&C.AV_CODEC_CAP_VARIABLE_FRAME_SIZE != 0 {
 		c.frame_size = 10000
 	}
 	return true
