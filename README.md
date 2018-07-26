@@ -13,6 +13,7 @@ History
 References
 =====
 - libav [Deprecated List](https://libav.org/documentation/doxygen/master/deprecated.html)
+- [Vim 8 Setup, November 2017](https://www.manniwood.com/2017_07_25/vimrc.html)
 
 
 Changes
