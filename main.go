@@ -21,7 +21,7 @@ func main() {
 	flag.BoolVar(&display, "display", false, "enable sdl display")
 
 	flag.Parse()
-	if flag.NFlag() == 0 {
+	if flag.NFlag() == 0 { // Don't use flag.NArg()
 		log.Println("no thing to mux")
 		flag.Usage()
 		return
