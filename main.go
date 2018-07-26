@@ -1,7 +1,8 @@
 package main
 
 import (
-	"./media"
+	//"./media"
+	"stoney/media-muxer/media"
 
 	"flag"
 	"fmt"
