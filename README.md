@@ -16,6 +16,7 @@ References
 
 Changes
 ====
+```
 - CODEC_CAP_VARIABLE_FRAME_SIZE -> AV.CODEC_CAP_VARIABLE_FRAME_SIZE 
 - CODEC_FLAG_GLOBAL_HEADER -> AV.CODEC_FLAG_GLOBAL_HEADER 
 
@@ -27,5 +28,6 @@ Changes
 - av_free_packet() ->  av_packet_unref()
 - av_register_all() ->  delete (comment out)
 - avcodec_copy_context() -> assign
+```
 
 
