@@ -91,7 +91,8 @@ func (id *Capture) Read(frame *C.AVFrame) error {
 	}
 	pkt := C.AVPacket{}
 	C.av_init_packet(&pkt)
-	defer C.av_free_packet(&pkt)
+	//defer C.av_free_packet(&pkt)
+	defer C.av_packet_unref(&pkt)
 	if C.av_read_frame(id.context, &pkt) < 0 {
 		return fmt.Errorf("read frame error")
 	}

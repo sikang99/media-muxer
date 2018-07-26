@@ -254,7 +254,8 @@ func (m *Muxer) writeVideoFrame(frame *C.AVFrame) bool {
 	m.videoStream.ts++
 	got_packet := C.int(0)
 	if C.avcodec_encode_video2(m.videoStream.stream.codec, &pkt, frame, &got_packet) < 0 {
-		C.av_free_packet(&pkt)
+		//C.av_free_packet(&pkt)
+		C.av_packet_unref(&pkt)
 		return false
 	}
 	if got_packet == 0 {
@@ -289,7 +290,8 @@ func (m *Muxer) writeAudioFrame(frame *C.AVFrame) bool {
 		output_frame.pts = C.int64_t(m.audioStream.ts)
 		m.audioStream.ts += int(m.audioStream.stream.codec.frame_size)
 		if C.avcodec_encode_audio2(m.audioStream.stream.codec, &pkt, frame, &got_packet) < 0 {
-			C.av_free_packet(&pkt)
+			//C.av_free_packet(&pkt)
+			C.av_packet_unref(&pkt)
 			return false
 		}
 		if got_packet == 0 {
@@ -389,6 +391,6 @@ func (m *Muxer) routine() {
 }
 
 func init() {
-	C.av_register_all()
+	//C.av_register_all()
 	C.avformat_network_init()
 }
