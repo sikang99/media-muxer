@@ -3,6 +3,11 @@
 #
 all: usage
 
+usage:
+	@echo ""
+	@echo "usage: make [edit|build|run|test]"
+	@echo ""
+
 edit-readme er:
 	vim README.md
 
@@ -19,6 +24,7 @@ run r:
 	go run
 
 
+# -------------------------------------------------------------------------------------
 git  g:
 	@echo ""
 	@echo "make (git) [up|set]"
